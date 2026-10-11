@@ -11,7 +11,7 @@ type Shell = typeof Shell.Type
 const Saved = Schema.Struct({ shells: Schema.NonEmptyArray(Shell), current: Schema.Number })
 const decodeSaved = Schema.decodeUnknownOption(Schema.fromJsonString(Saved))
 
-const storageKey = (threadId: string) => `termy.panelShells.${threadId}`
+const storageKey = (threadId: string) => `vestle.panelShells.${threadId}`
 
 /** The thread's panel shells from last time; they're still running in the daemon. */
 const restore = (threadId: string): typeof Saved.Type => {

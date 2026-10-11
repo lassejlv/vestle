@@ -35,7 +35,7 @@ use tokio::{
 use crate::{agent_terminal::AgentTerminals, paths};
 
 /// Bumped whenever the wire protocol changes, so an app never talks to an incompatible daemon.
-pub const PROTOCOL: u64 = 1;
+pub const PROTOCOL: u64 = 2;
 
 /// With no window, agent or shell for this long, the daemon exits.
 const IDLE_EXIT: Duration = Duration::from_secs(10 * 60);
@@ -153,7 +153,7 @@ pub fn run() {
 async fn serve() -> i32 {
     let socket = paths::socket_path();
     if UnixStream::connect(&socket).await.is_ok() {
-        eprintln!("termy daemon: already running at {}", socket.display());
+        eprintln!("vestle daemon: already running at {}", socket.display());
         return 0;
     }
     if let Some(parent) = socket.parent() {
@@ -163,14 +163,14 @@ async fn serve() -> i32 {
     let listener = match UnixListener::bind(&socket) {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("termy daemon: couldn't listen on {}: {error}", socket.display());
+            eprintln!("vestle daemon: couldn't listen on {}: {error}", socket.display());
             return 1;
         }
     };
     restrict_to_user(&socket);
 
     let daemon = Daemon::new();
-    eprintln!("termy daemon: listening on {} (pid {})", socket.display(), std::process::id());
+    eprintln!("vestle daemon: listening on {} (pid {})", socket.display(), std::process::id());
 
     let idle = tokio::spawn(watch_idle(daemon.clone()));
     loop {
@@ -179,7 +179,7 @@ async fn serve() -> i32 {
                 Ok((stream, _)) => {
                     tokio::spawn(connection(daemon.clone(), stream));
                 }
-                Err(error) => eprintln!("termy daemon: accept failed: {error}"),
+                Err(error) => eprintln!("vestle daemon: accept failed: {error}"),
             },
             _ = daemon.shutdown.notified() => break,
         }
@@ -188,7 +188,7 @@ async fn serve() -> i32 {
     daemon.agents.kill_all(&daemon);
     daemon.shells.close_all();
     let _ = std::fs::remove_file(&socket);
-    eprintln!("termy daemon: stopped");
+    eprintln!("vestle daemon: stopped");
     0
 }
 
@@ -209,7 +209,7 @@ async fn watch_idle(daemon: Arc<Daemon>) {
         }
         let since = *idle_since.get_or_insert_with(Instant::now);
         if since.elapsed() >= IDLE_EXIT {
-            eprintln!("termy daemon: idle, exiting");
+            eprintln!("vestle daemon: idle, exiting");
             daemon.shutdown.notify_one();
             return;
         }
@@ -356,9 +356,9 @@ for line in sys.stdin:
     fn test_data_dir() -> &'static Path {
         static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
         DIR.get_or_init(|| {
-            let dir = std::env::temp_dir().join(format!("termy-daemon-test-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("vestle-daemon-test-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();
-            std::env::set_var("TERMY_DATA_DIR", &dir);
+            std::env::set_var("VESTLE_DATA_DIR", &dir);
             dir
         })
     }
@@ -449,7 +449,7 @@ for line in sys.stdin:
         let answered = next_event(&mut second_inbox, "agent.entry").await;
         assert_eq!(answered["entry"]["message"]["params"]["update"]["answer"]["outcome"], "allowed");
         let ended = next_event(&mut second_inbox, "agent.entry").await;
-        assert_eq!(ended["entry"]["message"]["method"], "_termy/turn_end");
+        assert_eq!(ended["entry"]["message"]["method"], "_vestle/turn_end");
         assert_eq!(ended["entry"]["message"]["params"]["stopReason"], "end_turn");
 
         let agent = listed(&daemon, "thread-1").await;
@@ -552,7 +552,7 @@ for line in sys.stdin:
         assert!(listed(&daemon, "thread-crash").await["turn"].is_null());
         let attached = dispatch(&daemon, 2, "agent.attach", json!({ "key": "thread-crash", "after": 0 })).await.unwrap();
         let last = attached["entries"].as_array().unwrap().last().cloned().expect("a log entry");
-        assert_eq!(last["message"]["method"], "_termy/turn_end");
+        assert_eq!(last["message"]["method"], "_vestle/turn_end");
         assert_eq!(last["message"]["params"]["sessionId"], "s");
         assert_eq!(
             last["message"]["params"]["error"]["message"],

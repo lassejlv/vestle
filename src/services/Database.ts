@@ -57,7 +57,7 @@ export class Database extends Context.Service<
     deleteThread(id: string): Effect.Effect<void, DatabaseError>
     searchThreads(query: string): Effect.Effect<ReadonlyArray<SearchHit>, DatabaseError>
   }
->()("termy/services/Database") {
+>()("vestle/services/Database") {
   static readonly layer = Layer.effect(
     Database,
     Effect.gen(function* () {

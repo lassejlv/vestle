@@ -4,14 +4,14 @@
 use std::path::PathBuf;
 
 /// Matches `identifier` in tauri.conf.json, which is where Tauri puts app data.
-const IDENTIFIER: &str = "dev.termy.code";
+const IDENTIFIER: &str = "dev.vestle.desktop";
 
 /// macOS limits a Unix socket path to 104 bytes.
 const MAX_SOCKET_PATH: usize = 100;
 
 pub fn data_dir() -> PathBuf {
     // Lets tests (and a second dev copy) run without touching the real app's data.
-    if let Some(dir) = std::env::var_os("TERMY_DATA_DIR") {
+    if let Some(dir) = std::env::var_os("VESTLE_DATA_DIR") {
         return PathBuf::from(dir);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);

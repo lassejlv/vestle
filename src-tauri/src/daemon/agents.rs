@@ -14,7 +14,7 @@
 //!   with the last number it saved and gets everything after it. Notifications
 //!   that arrive during `session/load` are marked `replay`, since they repeat
 //!   history the window already has.
-//! - The end of every `session/prompt` is logged as a `_termy/turn_end`
+//! - The end of every `session/prompt` is logged as a `_vestle/turn_end`
 //!   notification, so a turn that finished while no window watched still ends
 //!   in the thread.
 //! - The newest session-level update of each kind (commands, mode, config,
@@ -46,7 +46,7 @@ const STDERR_LINES: usize = 20;
 /// How long an exited agent's output gets to drain before its exit is reported. A child it
 /// left running can hold the pipes open, so this is a cap, not a wait for them to close.
 const DRAIN: Duration = Duration::from_millis(500);
-const TURN_END: &str = "_termy/turn_end";
+const TURN_END: &str = "_vestle/turn_end";
 
 /// Updates that set session state rather than add to the timeline; only the newest of each counts.
 const STATE_UPDATES: &[&str] = &[
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn log_numbers_entries_and_survives_a_restart() {
-        let dir = std::env::temp_dir().join(format!("termy-log-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vestle-log-test-{}", std::process::id()));
         let path = dir.join("thread.ndjson");
         let mut log = AgentLog::fresh(path.clone());
         log.append(false, json!({ "method": "session/update", "params": { "n": 1 } }));
@@ -764,7 +764,7 @@ mod tests {
 
     #[test]
     fn log_file_is_rewritten_only_once_saved_lines_outnumber_the_rest() {
-        let dir = std::env::temp_dir().join(format!("termy-log-ack-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vestle-log-ack-test-{}", std::process::id()));
         let path = dir.join("thread.ndjson");
         let lines = || fs::read_to_string(&path).unwrap().lines().count();
         let mut log = AgentLog::fresh(path.clone());
@@ -786,7 +786,7 @@ mod tests {
 
     #[test]
     fn a_deleted_log_stays_deleted() {
-        let dir = std::env::temp_dir().join(format!("termy-log-delete-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vestle-log-delete-test-{}", std::process::id()));
         let path = dir.join("thread.ndjson");
         let mut log = AgentLog::fresh(path.clone());
         log.append(false, json!({ "method": "session/update" }));

@@ -409,9 +409,9 @@ mod tests {
         let sink = output.clone();
         let mut sanitizer = Sanitizer::default();
         let launch = TerminalLaunch::ShellCommand(
-            "printf '\\033[32mbuilding\\033[0m\\r\\n10%%\\r100%%\\n'; echo \"$TERMY_AGENT\"; exit 3".to_owned(),
+            "printf '\\033[32mbuilding\\033[0m\\r\\n10%%\\r100%%\\n'; echo \"$VESTLE_AGENT\"; exit 3".to_owned(),
         );
-        let environment = [("TERMY_AGENT".to_owned(), "codex".to_owned())];
+        let environment = [("VESTLE_AGENT".to_owned(), "codex".to_owned())];
         let pty = Pty::spawn(
             PtyCommand {
                 launch: Some(&launch),

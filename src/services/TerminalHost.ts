@@ -42,7 +42,7 @@ export class TerminalHost extends Context.Service<
     /** Ends the shell for good. */
     close(key: string): Effect.Effect<void>
   }
->()("termy/services/TerminalHost") {
+>()("vestle/services/TerminalHost") {
   static readonly layer = Layer.effect(
     TerminalHost,
     Effect.gen(function* () {

@@ -8,10 +8,10 @@ fn raw_output_environment_and_exit_status_are_ready_when_exit_fires() {
         program: "/bin/sh".into(),
         args: vec![
             "-c".into(),
-            "printf '\\033[32m%s\\033[0m' \"$TERMY_PTY_TEST\"; exit 7".into(),
+            "printf '\\033[32m%s\\033[0m' \"$VESTLE_PTY_TEST\"; exit 7".into(),
         ],
     };
-    let environment = [("TERMY_PTY_TEST".into(), "raw-output".into())];
+    let environment = [("VESTLE_PTY_TEST".into(), "raw-output".into())];
     let output = Arc::new(Mutex::new(Vec::new()));
     let sink = output.clone();
     let (tx, rx) = mpsc::channel();

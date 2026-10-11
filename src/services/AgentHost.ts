@@ -51,7 +51,7 @@ const decodeExit = Schema.decodeUnknownOption(ExitEvent)
  * Where a logged notification carries its log entry number into the client, so the window
  * knows which entries it has applied, not just which it has queued.
  */
-const LOG_SEQ = "termy/logSeq"
+const LOG_SEQ = "vestle/logSeq"
 
 const decodeLogSeq = Schema.decodeUnknownOption(Schema.Struct({ _meta: Schema.Struct({ [LOG_SEQ]: Schema.Number }) }))
 
@@ -109,7 +109,7 @@ export class AgentHost extends Context.Service<
     ack(key: string, seq: number): Effect.Effect<void>
     list(): Effect.Effect<ReadonlyArray<AgentSummary>>
   }
->()("termy/services/AgentHost") {
+>()("vestle/services/AgentHost") {
   static readonly layer = Layer.effect(
     AgentHost,
     Effect.gen(function* () {

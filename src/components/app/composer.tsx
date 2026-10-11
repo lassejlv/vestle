@@ -126,7 +126,7 @@ const ModeMenu = ({ session }: { session: Session }) => {
   )
 }
 
-/* Notra's Claude plus menu, with the items Termy can actually do. */
+/* Notra's Claude plus menu, with the items Vestle can actually do. */
 const MENU_SURFACE_CLASS =
   "rounded-2xl bg-popover/97 p-1.5 shadow-popover ring-0 backdrop-blur-xl"
 

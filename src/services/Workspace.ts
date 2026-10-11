@@ -80,10 +80,10 @@ export type Tab = typeof Tab.Type
 
 const decodeTabs = Schema.decodeUnknownOption(Schema.Array(Tab))
 
-const TABS_KEY = "termy.tabs.v2"
+const TABS_KEY = "vestle.tabs.v2"
 
 /** The permission mode last picked for each agent, so new and reopened threads start in it. */
-const modeKey = (agentId: AgentId) => `termy.mode.${agentId}`
+const modeKey = (agentId: AgentId) => `vestle.mode.${agentId}`
 
 const rememberMode = (agentId: AgentId, modeId: string) =>
   Effect.sync(() => {
@@ -233,7 +233,7 @@ export class Workspace extends Context.Service<
     /** Skills the agent can use in `cwd`, for `$` mentions. */
     listSkills(agentId: AgentId, cwd: string): Effect.Effect<ReadonlyArray<Skill>, WorkspaceError>
   }
->()("termy/services/Workspace") {
+>()("vestle/services/Workspace") {
   static readonly layer = Layer.effect(
     Workspace,
     Effect.gen(function* () {
@@ -564,7 +564,7 @@ export class Workspace extends Context.Service<
         const on = handlers(id, handle)
         if (!method || !params) return Effect.void
         if (method === "session/update") return on.onUpdate(params as unknown as acp.SessionNotification)
-        if (method === "_termy/turn_end") {
+        if (method === "_vestle/turn_end") {
           return on.onTurnEnd({
             stopReason: (params.stopReason as acp.StopReason | null | undefined) ?? null,
             error: (params.error as TurnEnd["error"] | undefined) ?? null,
@@ -834,7 +834,7 @@ export class Workspace extends Context.Service<
       )
 
       /**
-       * Sends the prompt. How it ends arrives as the daemon's `_termy/turn_end` (see `endTurn`), in
+       * Sends the prompt. How it ends arrives as the daemon's `_vestle/turn_end` (see `endTurn`), in
        * order with the agent's updates and even if the window closed meanwhile. Only a prompt the
        * daemon couldn't deliver at all ends here.
        */

@@ -91,7 +91,7 @@ export const fontStack = (family: string, fallback: string) => {
 const UI_FALLBACK = "system-ui, sans-serif"
 export const CODE_FALLBACK = "ui-monospace, monospace"
 
-const STORAGE_KEY = "termy.settings"
+const STORAGE_KEY = "vestle.settings"
 
 const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))
 

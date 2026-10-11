@@ -21,7 +21,7 @@ def smoke(app):
     with tempfile.TemporaryDirectory(prefix='tc-smoke-', dir='/tmp') as data:
         daemon = subprocess.Popen(
             [str(app / 'Contents/MacOS/vestle'), '--daemon'],
-            env=dict(os.environ, TERMY_DATA_DIR=data),
+            env=dict(os.environ, VESTLE_DATA_DIR=data),
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
         connections = []

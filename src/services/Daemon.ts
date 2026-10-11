@@ -29,7 +29,7 @@ export class Daemon extends Context.Service<
     /** The app lost the daemon (it crashed or was stopped); everything it ran is gone. */
     onDisconnect(handler: () => void): Effect.Effect<void, never, Scope.Scope>
   }
->()("termy/services/Daemon") {
+>()("vestle/services/Daemon") {
   static readonly layer = Layer.effect(
     Daemon,
     Effect.gen(function* () {

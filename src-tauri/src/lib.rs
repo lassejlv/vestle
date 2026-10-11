@@ -28,7 +28,7 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            app.manage(db::Db::open(&dir.join("termy.db"))?);
+            app.manage(db::Db::open(&dir.join("vestle.db"))?);
             // Agents and shells live in the background daemon, so they outlive this window.
             app.manage(daemon_client::DaemonClient::new(app.handle().clone()));
             Ok(())

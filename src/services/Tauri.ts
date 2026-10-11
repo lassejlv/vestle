@@ -20,7 +20,7 @@ export class Tauri extends Context.Service<
     pickDirectory(): Effect.Effect<string | null, TauriError>
     pickImages(): Effect.Effect<ReadonlyArray<string>, TauriError>
   }
->()("termy/services/Tauri") {
+>()("vestle/services/Tauri") {
   static readonly layer = Layer.succeed(
     Tauri,
     Tauri.of({

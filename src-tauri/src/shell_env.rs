@@ -3,7 +3,7 @@
 
 use std::{process::Command, sync::OnceLock};
 
-const MARKER: &str = "__TERMY_PATH__";
+const MARKER: &str = "__VESTLE_PATH__";
 
 static LOGIN_PATH: OnceLock<String> = OnceLock::new();
 

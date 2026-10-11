@@ -13,7 +13,7 @@ import "./index.css"
 const router = createRouter({ routeTree, defaultPreload: false })
 
 /** Reopening the app comes back to the thread, terminal or page it was on. */
-const LOCATION_KEY = "termy.location"
+const LOCATION_KEY = "vestle.location"
 try {
   const saved = localStorage.getItem(LOCATION_KEY)
   if (saved && saved !== "/") router.history.replace(saved)

@@ -24,7 +24,7 @@ const Search = Schema.Struct({
   agent: Schema.optional(AgentId),
 })
 
-const LAST_AGENT_KEY = "termy.lastAgent"
+const LAST_AGENT_KEY = "vestle.lastAgent"
 
 const agentNames = new Intl.ListFormat("en", { type: "conjunction" }).format(agentList.map((agent) => agent.name))
 

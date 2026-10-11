@@ -1,5 +1,5 @@
 //! Local SQLite store for projects and threads.
-//! Lives at `<app data dir>/termy.db`. Thread timelines are stored as JSON.
+//! Lives at `<app data dir>/vestle.db`. Thread timelines are stored as JSON.
 
 use std::{path::Path, sync::Mutex};
 

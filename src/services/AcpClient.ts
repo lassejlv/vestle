@@ -31,7 +31,7 @@ export interface ClientHandlers {
   readonly onTurnEnd: (end: TurnEnd) => Effect.Effect<void>
 }
 
-/** `_termy/turn_end`: how a `session/prompt` ended, whether or not a window was watching. */
+/** `_vestle/turn_end`: how a `session/prompt` ended, whether or not a window was watching. */
 export interface TurnEnd {
   readonly stopReason: acp.StopReason | null
   readonly error: { readonly message: string } | null
@@ -39,7 +39,7 @@ export interface TurnEnd {
   readonly logSeq: number | null
 }
 
-const TURN_END = "_termy/turn_end"
+const TURN_END = "_vestle/turn_end"
 
 export interface Prompt {
   readonly text: string
@@ -91,7 +91,7 @@ export class AcpClient extends Context.Service<
      */
     connect(process: AgentProcess, handlers: ClientHandlers): Effect.Effect<AcpConnection, AcpError, Scope.Scope>
   }
->()("termy/services/AcpClient") {
+>()("vestle/services/AcpClient") {
   static readonly layer = Layer.effect(
     AcpClient,
     Effect.gen(function* () {
