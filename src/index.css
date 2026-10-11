@@ -6,7 +6,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Instrument black chrome, one amber LED. Tokens mirror the Paper file. */
+/* Instrument black chrome, one white LED (the `amber` tokens are white for now). Tokens mirror the Paper file. */
 :root {
   --bg: #0c0c0d;
   --panel: #131315;
@@ -17,9 +17,9 @@
   --text-2: #9b9892;
   /* At least 4.5:1 on --raised, so small dim text stays readable. */
   --text-3: #85827b;
-  --amber: #ffb224;
-  --amber-ink: #1a1204;
-  --effort-max-gradient: linear-gradient(90deg, #ff7a1a 0%, #ffb224 25%, #ffe3a1 50%, #ffb224 75%, #ff7a1a 100%);
+  --amber: #ffffff;
+  --amber-ink: #0c0c0d;
+  --effort-max-gradient: linear-gradient(90deg, #8a8a8f 0%, #ffffff 25%, #d4d4d8 50%, #ffffff 75%, #8a8a8f 100%);
   --add: #4cc38a;
   --remove: #f0605a;
   --syn-keyword: #82a9e8;
@@ -43,7 +43,7 @@
   --destructive: var(--remove);
   --border: rgb(255 255 255 / 0.06);
   --input: rgb(255 255 255 / 0.08);
-  --ring: rgb(255 178 36 / 0.5);
+  --ring: rgb(255 255 255 / 0.5);
   --radius: 0.625rem;
 
   /* Overridden at runtime from Settings (src/lib/settings.ts). */
@@ -90,8 +90,8 @@
   --shadow-popover: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.07), 0 16px 40px rgb(0 0 0 / 0.5);
   --shadow-dialog: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(255 255 255 / 0.07), 0 24px 60px rgb(0 0 0 / 0.6);
   --shadow-composer: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.06), 0 20px 50px rgb(0 0 0 / 0.5);
-  --shadow-composer-drop: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1.5px rgb(255 178 36 / 0.6), 0 20px 50px rgb(0 0 0 / 0.5);
-  --shadow-amber: inset 0 1px 0 rgb(255 255 255 / 0.4), 0 1px 2px rgb(0 0 0 / 0.5), 0 0 18px rgb(255 178 36 / 0.22);
+  --shadow-composer-drop: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1.5px rgb(255 255 255 / 0.6), 0 20px 50px rgb(0 0 0 / 0.5);
+  --shadow-amber: inset 0 1px 0 rgb(255 255 255 / 0.4), 0 1px 2px rgb(0 0 0 / 0.5), 0 0 18px rgb(255 255 255 / 0.22);
 
   --color-bg: var(--bg);
   --color-panel: var(--panel);
@@ -209,7 +209,7 @@
     -webkit-user-select: none;
   }
   ::selection {
-    background: rgb(255 178 36 / 0.25);
+    background: rgb(255 255 255 / 0.25);
   }
   .selectable {
     user-select: text;
@@ -224,19 +224,14 @@
   .led {
     background: var(--amber);
     box-shadow:
-      0 0 0 3px rgb(255 178 36 / 0.16),
-      0 0 10px rgb(255 178 36 / 0.7);
+      0 0 0 3px rgb(255 255 255 / 0.16),
+      0 0 10px rgb(255 255 255 / 0.7);
   }
   .surface {
     background: var(--surface);
     box-shadow:
       0 0 0 1px rgb(255 255 255 / 0.05),
       0 8px 30px rgb(0 0 0 / 0.35);
-  }
-  /* xterm's stylesheet paints the viewport black; the terminal's own theme is transparent,
-     so the panel (and glass) shows through. */
-  .xterm .xterm-viewport {
-    background-color: transparent !important;
   }
   .no-scrollbar::-webkit-scrollbar {
     display: none;

@@ -39,7 +39,6 @@ pub fn run() {
             daemon_client::daemon_info,
             daemon_client::daemon_restart,
             workspace::fs_read_text,
-            workspace::fs_write_text,
             workspace::git_branch,
             workspace::fs_read_image,
             mentions::project_files,
@@ -54,5 +53,5 @@ pub fn run() {
             db::db_thread_delete,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Termy Code");
+        .expect("error while running Vestle");
 }

@@ -132,11 +132,10 @@ fn backpressure_does_not_block_drop_or_leave_an_ignoring_child_alive() {
     )
     .unwrap();
     assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), b"<ready>");
-    let error = pty
-        .write_owned(vec![b'x'; super::MAX_INPUT_BYTES + 1])
-        .unwrap_err();
+    // libtermy bounds queued input at 8 MiB.
+    let error = pty.write_owned(vec![b'x'; 9 * 1024 * 1024]).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
-    pty.write_owned(vec![b'x'; super::MAX_INPUT_BYTES]).unwrap();
+    pty.write_owned(vec![b'x'; 1024 * 1024]).unwrap();
     drop(pty);
     exit_rx
         .recv_timeout(Duration::from_secs(5))

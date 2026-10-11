@@ -224,7 +224,7 @@ const Updates = () => {
   )
   return (
     <Group title="Updates">
-      <Row label={`Termy Code ${version}`} detail={detail}>
+      <Row label={`Vestle ${version}`} detail={detail}>
         <button
           type="button"
           disabled={busy}
@@ -272,7 +272,7 @@ const Background = () => {
     <Group title="Background">
       <Row
         label="Running in the background"
-        detail="Agents and terminals keep working after you quit Termy Code, and pick up where they are when you open it again."
+        detail="Agents and terminals keep working after you quit Vestle, and pick up where they are when you open it again."
       >
         <span className="text-text-2 text-xs tabular-nums">
           {status === null ? "Connecting…" : `${count(status.agents, "agent")}, ${count(status.shells, "terminal")}`}
@@ -505,9 +505,6 @@ const SettingsView = () => {
             </Row>
             <Row label="Copy on select">
               <Switch checked={settings.termCopyOnSelect} onChange={set("termCopyOnSelect")} label="Copy on select" />
-            </Row>
-            <Row label="GPU rendering" detail="Sharper text and seamless box lines. Turn off if text looks wrong.">
-              <Switch checked={settings.termGpu} onChange={set("termGpu")} label="GPU rendering" />
             </Row>
           </Group>
 

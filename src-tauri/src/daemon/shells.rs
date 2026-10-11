@@ -2,7 +2,7 @@
 //!
 //! A window opens a shell by a key it chooses (its tab id). Opening a key that
 //! already exists attaches to it instead: the window gets the recent output to
-//! replay into xterm.js, then live output. Shells end only when a window closes
+//! replay into its web terminal, then live output. Shells end only when a window closes
 //! them or the program exits.
 
 use std::{

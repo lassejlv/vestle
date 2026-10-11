@@ -15,11 +15,6 @@ pub async fn fs_read_text(
     read_text(&path, line, limit).await
 }
 
-#[tauri::command]
-pub async fn fs_write_text(path: String, content: String) -> Result<(), String> {
-    write_text(&path, &content).await
-}
-
 /// ACP `fs/read_text_file`: the whole file, or `limit` lines from 1-based `line`.
 pub async fn read_text(path: &str, line: Option<usize>, limit: Option<usize>) -> Result<String, String> {
     let content = tokio::fs::read_to_string(path)

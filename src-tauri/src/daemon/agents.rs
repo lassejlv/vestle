@@ -24,24 +24,28 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{ChildStdin, Command},
-    sync::oneshot,
+    process::Command,
+    sync::{mpsc, oneshot},
 };
 
 use super::{now_ms, param, string, ConnId, Daemon};
 use crate::{agent_terminal::CreateRequest, paths, shell_env, workspace};
 
 const STDERR_LINES: usize = 20;
+/// How long an exited agent's output gets to drain before its exit is reported. A child it
+/// left running can hold the pipes open, so this is a cap, not a wait for them to close.
+const DRAIN: Duration = Duration::from_millis(500);
 const TURN_END: &str = "_termy/turn_end";
 
 /// Updates that set session state rather than add to the timeline; only the newest of each counts.
@@ -60,7 +64,9 @@ pub struct Agents {
 pub struct Agent {
     key: String,
     cwd: String,
-    stdin: tokio::sync::Mutex<Option<ChildStdin>>,
+    /// Lines for the agent's stdin, written in order by a task of its own, so a window's
+    /// requests never wait on an agent that has stopped reading. `None` for recovered agents.
+    input: Option<mpsc::UnboundedSender<String>>,
     kill: Mutex<Option<oneshot::Sender<()>>>,
     state: Mutex<AgentState>,
 }
@@ -148,6 +154,13 @@ struct AgentLog {
     path: PathBuf,
     entries: Vec<Value>,
     next_seq: u64,
+    /// Kept open for appends; dropped whenever the file is rewritten or removed.
+    file: Option<File>,
+    /// Lines still in the file that a window already saved. They're harmless (attaching
+    /// skips them), so the file is only rewritten once they outnumber the rest.
+    acked_lines: usize,
+    /// Set once the log is deleted, so a straggling notification doesn't bring the file back.
+    deleted: bool,
 }
 
 impl AgentLog {
@@ -157,6 +170,9 @@ impl AgentLog {
             path,
             entries: Vec::new(),
             next_seq: 1,
+            file: None,
+            acked_lines: 0,
+            deleted: false,
         }
     }
 
@@ -172,17 +188,31 @@ impl AgentLog {
             .max()
             .unwrap_or(0)
             + 1;
-        Self { path, entries, next_seq }
+        Self {
+            path,
+            entries,
+            next_seq,
+            file: None,
+            acked_lines: 0,
+            deleted: false,
+        }
     }
 
     fn append(&mut self, replay: bool, message: Value) -> Value {
         let entry = json!({ "seq": self.next_seq, "replay": replay, "message": message });
         self.next_seq += 1;
-        if let Some(parent) = self.path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&self.path) {
-            let _ = writeln!(file, "{entry}");
+        if !self.deleted {
+            if self.file.is_none() {
+                if let Some(parent) = self.path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                self.file = OpenOptions::new().create(true).append(true).open(&self.path).ok();
+            }
+            if let Some(file) = self.file.as_mut() {
+                if file.write_all(format!("{entry}\n").as_bytes()).is_err() {
+                    self.file = None;
+                }
+            }
         }
         self.entries.push(entry.clone());
         entry
@@ -201,18 +231,29 @@ impl AgentLog {
         let before = self.entries.len();
         self.entries
             .retain(|entry| entry.get("seq").and_then(Value::as_u64).is_some_and(|entry_seq| entry_seq > seq));
-        if self.entries.len() == before {
+        let dropped = before - self.entries.len();
+        if dropped == 0 || self.deleted {
             return;
         }
+        self.acked_lines += dropped;
         if self.entries.is_empty() {
+            self.file = None;
+            self.acked_lines = 0;
             let _ = fs::remove_file(&self.path);
             return;
         }
+        if self.acked_lines <= self.entries.len() {
+            return;
+        }
+        self.file = None;
         let text: String = self.entries.iter().map(|entry| format!("{entry}\n")).collect();
         let _ = fs::write(&self.path, text);
+        self.acked_lines = 0;
     }
 
-    fn delete(&self) {
+    fn delete(&mut self) {
+        self.deleted = true;
+        self.file = None;
         let _ = fs::remove_file(&self.path);
     }
 }
@@ -223,6 +264,18 @@ fn log_path(key: &str) -> PathBuf {
         .map(|character| if character.is_ascii_alphanumeric() || character == '-' { character } else { '_' })
         .collect();
     paths::agent_log_dir().join(format!("{safe}.ndjson"))
+}
+
+/// Why a turn ended when its agent went away mid-turn: the exit code and its last stderr line.
+fn exit_message(code: Option<i32>, stderr: &str) -> String {
+    let head = match code {
+        Some(code) => format!("The agent exited with code {code} during this turn."),
+        None => "The agent stopped during this turn.".to_owned(),
+    };
+    match stderr.lines().rev().map(str::trim).find(|line| !line.is_empty()) {
+        Some(line) => format!("{head} {line}"),
+        None => head,
+    }
 }
 
 fn turn_end(session_id: Option<&str>, response: &Value) -> Value {
@@ -252,13 +305,13 @@ impl Agents {
             state.exited = Some(None);
             state
                 .stderr
-                .push_back("Termy Code's background service restarted, so this agent stopped.".to_owned());
+                .push_back("Vestle's background service restarted, so this agent stopped.".to_owned());
             map.insert(
                 key.clone(),
                 Arc::new(Agent {
                     key,
                     cwd: String::new(),
-                    stdin: tokio::sync::Mutex::new(None),
+                    input: None,
                     kill: Mutex::new(None),
                     state: Mutex::new(state),
                 }),
@@ -354,13 +407,12 @@ impl Agent {
         }
     }
 
-    async fn write(&self, message: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().await;
-        let stdin = stdin.as_mut().ok_or("The agent has exited.")?;
-        let mut line = message.to_string();
-        line.push('\n');
-        stdin.write_all(line.as_bytes()).await.map_err(|error| error.to_string())?;
-        stdin.flush().await.map_err(|error| error.to_string())
+    /// Queues a message for the agent's stdin; fails once the agent stopped taking input.
+    fn write(&self, message: &Value) -> Result<(), String> {
+        let input = self.input.as_ref().ok_or("The agent has exited.")?;
+        input
+            .send(format!("{message}\n"))
+            .map_err(|_| "The agent has exited.".to_owned())
     }
 }
 
@@ -397,14 +449,22 @@ impl Daemon {
             .spawn()
             .map_err(|error| format!("Couldn't start `{command}`: {error}"))?;
 
-        let stdin = child.stdin.take().ok_or("Agent has no stdin")?;
+        let mut stdin = child.stdin.take().ok_or("Agent has no stdin")?;
         let stdout = child.stdout.take().ok_or("Agent has no stdout")?;
         let stderr = child.stderr.take().ok_or("Agent has no stderr")?;
         let (kill_tx, kill_rx) = oneshot::channel();
+        let (input, mut queued) = mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Some(line) = queued.recv().await {
+                if stdin.write_all(line.as_bytes()).await.is_err() || stdin.flush().await.is_err() {
+                    break;
+                }
+            }
+        });
         let agent = Arc::new(Agent {
             key: key.clone(),
             cwd,
-            stdin: tokio::sync::Mutex::new(Some(stdin)),
+            input: Some(input),
             kill: Mutex::new(Some(kill_tx)),
             state: Mutex::new(AgentState::new(AgentLog::fresh(log_path(&key)))),
         });
@@ -416,7 +476,7 @@ impl Daemon {
 
         let daemon = self.clone();
         let reader = agent.clone();
-        tokio::spawn(async move {
+        let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 // Agents sometimes log to stdout; anything that isn't JSON-RPC is noise.
@@ -427,7 +487,7 @@ impl Daemon {
         });
 
         let tail = agent.clone();
-        tokio::spawn(async move {
+        let stderr_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(mut state) = tail.state.lock() {
@@ -449,6 +509,12 @@ impl Daemon {
                     child.wait().await.ok()
                 }
             };
+            // Its last updates and stderr lines go in before the exit is reported.
+            let drained = async {
+                let _ = stdout_task.await;
+                let _ = stderr_task.await;
+            };
+            let _ = tokio::time::timeout(DRAIN, drained).await;
             daemon.agent_exited(&watched, status.and_then(|status| status.code()));
         });
 
@@ -460,9 +526,18 @@ impl Daemon {
         let Ok(mut state) = agent.state.lock() else { return };
         state.exited = Some(code);
         state.pending.clear();
-        state.turn = None;
         let stderr = state.stderr.iter().cloned().collect::<Vec<_>>().join("\n");
         let attached: Vec<ConnId> = state.attached.iter().copied().collect();
+        // The turn in flight will never get its `session/prompt` response. A window watching sees
+        // the exit itself; for the rest, the log ends the turn with the reason, so the thread says
+        // why it stopped when a window next collects it.
+        if let Some(turn) = state.turn.take() {
+            if attached.is_empty() {
+                let session_id = turn.get("sessionId").and_then(Value::as_str);
+                let failed = json!({ "error": { "code": -32603, "message": exit_message(code, &stderr) } });
+                state.log.append(false, turn_end(session_id, &failed));
+            }
+        }
         self.hub
             .event(attached, "agent.exit", json!({ "key": agent.key, "code": code, "stderr": stderr }));
     }
@@ -471,7 +546,7 @@ impl Daemon {
     pub fn kill_agent(&self, key: &str) {
         if let Some(agent) = self.agents.remove(key) {
             agent.stop();
-            if let Ok(state) = agent.state.lock() {
+            if let Ok(mut state) = agent.state.lock() {
                 state.log.delete();
             }
         }
@@ -479,7 +554,7 @@ impl Daemon {
     }
 
     /// A JSON-RPC message from a window to the agent.
-    pub async fn send_to_agent(&self, conn: ConnId, key: &str, mut message: Value) -> Result<Value, String> {
+    pub fn send_to_agent(&self, conn: ConnId, key: &str, mut message: Value) -> Result<Value, String> {
         let agent = self.agents.get(key)?;
         {
             let mut state = agent.state.lock().map_err(|_| "Agent poisoned")?;
@@ -518,11 +593,18 @@ impl Daemon {
                     message["id"] = json!(daemon_id);
                 }
                 // An answer to one of the agent's requests.
-                (None, Some(id)) => state.pending.retain(|request| request.get("id") != Some(&id)),
+                (None, Some(id)) => {
+                    let before = state.pending.len();
+                    state.pending.retain(|request| request.get("id") != Some(&id));
+                    // Another window answered first; the agent mustn't get a second response.
+                    if state.pending.len() == before {
+                        return Ok(Value::Null);
+                    }
+                }
                 _ => {}
             }
         }
-        agent.write(&message).await?;
+        agent.write(&message)?;
         Ok(Value::Null)
     }
 
@@ -544,7 +626,7 @@ impl Daemon {
                             "error": { "code": -32603, "message": error },
                         }),
                     };
-                    let _ = agent.write(&response).await;
+                    let _ = agent.write(&response);
                 });
             }
             (Some(_), Some(_)) => {
@@ -650,7 +732,7 @@ impl Daemon {
                 self.terminals.release(&text("terminalId")?)?;
                 Ok(json!({}))
             }
-            other => Err(format!("Termy Code doesn't support `{other}`")),
+            other => Err(format!("Vestle doesn't support `{other}`")),
         }
     }
 }
@@ -678,6 +760,50 @@ mod tests {
         log.ack(3);
         assert!(!path.exists());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn log_file_is_rewritten_only_once_saved_lines_outnumber_the_rest() {
+        let dir = std::env::temp_dir().join(format!("termy-log-ack-test-{}", std::process::id()));
+        let path = dir.join("thread.ndjson");
+        let lines = || fs::read_to_string(&path).unwrap().lines().count();
+        let mut log = AgentLog::fresh(path.clone());
+        for n in 1..=4 {
+            log.append(false, json!({ "method": "session/update", "params": { "n": n } }));
+        }
+
+        log.ack(1);
+        assert_eq!(lines(), 4, "one saved line among three unsaved stays in the file");
+        log.ack(3);
+        assert_eq!(lines(), 1, "three saved lines to one unsaved: rewritten");
+        log.append(false, json!({ "method": "session/update", "params": { "n": 5 } }));
+        assert_eq!(lines(), 2, "appends go on after a rewrite");
+        let recovered = AgentLog::recover(path.clone());
+        assert_eq!(recovered.after(0).len(), 2);
+        assert_eq!(recovered.next_seq, 6);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_deleted_log_stays_deleted() {
+        let dir = std::env::temp_dir().join(format!("termy-log-delete-test-{}", std::process::id()));
+        let path = dir.join("thread.ndjson");
+        let mut log = AgentLog::fresh(path.clone());
+        log.append(false, json!({ "method": "session/update" }));
+        log.delete();
+        assert!(!path.exists());
+        log.append(false, json!({ "method": "session/update" }));
+        assert!(!path.exists(), "a straggling notification doesn't bring the file back");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn exit_message_gives_the_code_and_the_last_stderr_line() {
+        assert_eq!(
+            exit_message(Some(1), "starting\nError: not logged in\n\n"),
+            "The agent exited with code 1 during this turn. Error: not logged in"
+        );
+        assert_eq!(exit_message(None, ""), "The agent stopped during this turn.");
     }
 
     #[test]

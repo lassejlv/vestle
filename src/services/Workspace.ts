@@ -43,7 +43,7 @@ import {
   untitled,
 } from "@/domain/session"
 import { type AcpConnection, AcpClient, AcpError, type Prompt, type TurnEnd } from "./AcpClient"
-import { AgentHost, type AgentProcess, type AgentSummary } from "./AgentHost"
+import { AgentHost, type AgentProcess, type AgentSummary, logSeqOf } from "./AgentHost"
 import { Daemon } from "./Daemon"
 import { Database, Project, type SearchHit, type ThreadSummary } from "./Database"
 import { Tauri } from "./Tauri"
@@ -148,18 +148,33 @@ export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()("Worksp
   message: Schema.String,
 }) {}
 
+/** A request the agent is blocked on, and where the user's answer goes. */
+interface Asked {
+  readonly request: PendingRequest
+  readonly answer: Deferred.Deferred<unknown>
+}
+
 /** Process-side state for a session that isn't serialisable into the store. */
 interface Live {
   readonly scope: Scope.Closeable
   readonly ready: Deferred.Deferred<AcpConnection, WorkspaceError>
-  /** Resolves the request the agent is blocked on (permission, question, plan). */
-  request: Deferred.Deferred<unknown> | null
+  /** Settles once `establish` has started the agent process or won't, so a kill can't overtake the spawn. */
+  readonly spawned: Deferred.Deferred<void>
+  /** Requests the agent is blocked on (permission, question, plan), oldest first; the first is shown. */
+  readonly requests: Array<Asked>
   /** Cursor's running todo list, so `merge` updates have something to merge into. */
   todos: ReadonlyArray<Todo>
   /** True while `session/load` replays history we already have on disk. */
   replaying: boolean
-  /** The last daemon log entry the session has seen; saved with the thread. */
-  lastSeq: () => number
+  /** The last daemon log entry applied to the session; saved with the thread. */
+  logSeq: number
+  /** Its tab closed mid-turn, so the agent goes once the turn ends. */
+  closeWhenIdle: boolean
+}
+
+/** Records that the session has applied log entry `seq`. */
+const noteApplied = (handle: Live, seq: number | null) => {
+  if (seq !== null && seq > handle.logSeq) handle.logSeq = seq
 }
 
 /** Permission, question and plan requests all share this cancelled shape. */
@@ -263,7 +278,7 @@ export class Workspace extends Context.Service<
         if (!session || !session.items.some((item) => item._tag === "User")) return
         const now = yield* Clock.currentTimeMillis
         const handle = live.get(id)
-        const logSeq = handle ? handle.lastSeq() : session.logSeq
+        const logSeq = handle ? handle.logSeq : session.logSeq
         const record = {
           id: session.id,
           projectId: session.projectId,
@@ -289,23 +304,37 @@ export class Workspace extends Context.Service<
 
       // ── agent connection ──────────────────────────────────────────────
 
-      /** Shows a request in the composer and waits for the user's answer. */
-      const ask = <A>(id: string, request: PendingRequest) =>
+      const showRequest = (id: string, handle: Live) =>
+        updateSession(id, (session) => ({ ...session, request: handle.requests[0]?.request ?? null }))
+
+      /**
+       * Queues a request for the composer and waits for the user's answer. Agents can ask several
+       * at once (parallel tool calls, subagents); they're shown one at a time, oldest first.
+       */
+      const ask = <A>(id: string, handle: Live, request: PendingRequest) =>
         Effect.gen(function* () {
-          const handle = live.get(id)
-          if (!handle) return cancelled as A
+          // A connection the thread let go of can't deliver an answer anyway.
+          if (live.get(id) !== handle) return cancelled as A
           const answer = yield* Deferred.make<unknown>()
-          handle.request = answer
-          yield* updateSession(id, (session) => ({ ...session, request }))
-          const response = yield* Deferred.await(answer)
-          handle.request = null
-          yield* updateSession(id, (session) => ({ ...session, request: null }))
-          return response as A
+          handle.requests.push({ request, answer })
+          yield* showRequest(id, handle)
+          return (yield* Deferred.await(answer)) as A
         })
 
+      /** Answers the request on show and moves on to the next. */
       const resolveRequest = Effect.fnUntraced(function* (id: string, response: unknown) {
         const handle = live.get(id)
-        if (handle?.request) yield* Deferred.succeed(handle.request, response)
+        const asked = handle?.requests.shift()
+        if (!handle || !asked) return
+        yield* Deferred.succeed(asked.answer, response)
+        yield* showRequest(id, handle)
+      })
+
+      /** Cancels every request the agent is blocked on, as ACP asks of a cancelled turn. */
+      const cancelRequests = Effect.fnUntraced(function* (id: string, handle: Live) {
+        const asked = handle.requests.splice(0)
+        for (const { answer } of asked) yield* Deferred.succeed(answer, cancelled)
+        if (asked.length > 0) yield* showRequest(id, handle)
       })
 
       const addNotice = (id: string, text: string) =>
@@ -315,11 +344,10 @@ export class Workspace extends Context.Service<
         }))
 
       /** Cursor's todo list is shown as the thread's plan. */
-      const applyTodos = (id: string, todos: ReadonlyArray<Todo>, merge: boolean) =>
+      const applyTodos = (id: string, handle: Live, todos: ReadonlyArray<Todo>, merge: boolean) =>
         Effect.gen(function* () {
-          const handle = live.get(id)
-          const next = mergeTodos(handle?.todos ?? [], todos, merge)
-          if (handle) handle.todos = next
+          const next = mergeTodos(handle.todos, todos, merge)
+          handle.todos = next
           yield* updateSession(id, (session) =>
             applyUpdate(session, { sessionUpdate: "plan", entries: toPlanEntries(next) }),
           )
@@ -333,13 +361,13 @@ export class Workspace extends Context.Service<
         ) as Effect.Effect<Option.Option<S["Type"]>>
 
       /** Cursor's ACP extensions. Anything else is reported as unsupported. */
-      const onExtension = (id: string) => (method: string, params: Record<string, unknown>) =>
+      const onExtension = (id: string, handle: Live) => (method: string, params: Record<string, unknown>) =>
         Effect.gen(function* (): Effect.fn.Return<Record<string, unknown> | null> {
           switch (methodName(method)) {
             case "cursor/ask_question": {
               const request = yield* decode(AskQuestion, params)
               if (request._tag === "None") return null
-              return yield* ask<Record<string, unknown>>(id, {
+              return yield* ask<Record<string, unknown>>(id, handle, {
                 _tag: "Question",
                 title: request.value.title ?? null,
                 questions: request.value.questions,
@@ -348,8 +376,8 @@ export class Workspace extends Context.Service<
             case "cursor/create_plan": {
               const request = yield* decode(CreatePlan, params)
               if (request._tag === "None") return null
-              yield* applyTodos(id, request.value.todos, false)
-              return yield* ask<Record<string, unknown>>(id, {
+              yield* applyTodos(id, handle, request.value.todos, false)
+              return yield* ask<Record<string, unknown>>(id, handle, {
                 _tag: "PlanApproval",
                 name: request.value.name ?? null,
                 overview: request.value.overview ?? null,
@@ -360,7 +388,7 @@ export class Workspace extends Context.Service<
             case "cursor/update_todos": {
               const request = yield* decode(UpdateTodos, params)
               if (request._tag === "None") return null
-              const todos = yield* applyTodos(id, request.value.todos, request.value.merge ?? false)
+              const todos = yield* applyTodos(id, handle, request.value.todos, request.value.merge ?? false)
               return { outcome: { outcome: "accepted", todos } }
             }
             case "cursor/task": {
@@ -369,18 +397,18 @@ export class Workspace extends Context.Service<
               return { outcome: { outcome: "completed" } }
             }
             case "cursor/generate_image":
-              return { outcome: { outcome: "rejected", reason: "Termy Code can't show generated images yet." } }
+              return { outcome: { outcome: "rejected", reason: "Vestle can't show generated images yet." } }
             default:
               return null
           }
         })
 
-      const onExtensionNotification = (id: string) => (method: string, params: Record<string, unknown>) =>
+      const onExtensionNotification = (id: string, handle: Live) => (method: string, params: Record<string, unknown>) =>
         Effect.gen(function* () {
           switch (methodName(method)) {
             case "cursor/update_todos": {
               const request = yield* decode(UpdateTodos, params)
-              if (request._tag === "Some") yield* applyTodos(id, request.value.todos, request.value.merge ?? false)
+              if (request._tag === "Some") yield* applyTodos(id, handle, request.value.todos, request.value.merge ?? false)
               return
             }
             case "cursor/task": {
@@ -396,8 +424,11 @@ export class Workspace extends Context.Service<
           }
         })
 
-      /** A prompt finished (maybe while no window watched): settle its steps, say why it stopped, time it, save. */
-      const endTurn = (id: string) => (end: TurnEnd) =>
+      /**
+       * A prompt finished (maybe while no window watched): settle its steps, say why it stopped, time it,
+       * save. `handle` is the connection it arrived on, which has now applied it.
+       */
+      const endTurn = (id: string, handle?: Live) => (end: TurnEnd) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
           const notice = (text: string, tone: "info" | "error"): TimelineItem => ({
@@ -422,24 +453,36 @@ export class Workspace extends Context.Service<
               items: session.turnStartedAt === null ? items : timeTurn(items, now - session.turnStartedAt),
             }
           })
+          if (handle) noteApplied(handle, end.logSeq)
           yield* persist(id)
+          // Its tab closed while it worked; now it's idle, let it go unless the tab came back.
+          if (handle?.closeWhenIdle && live.get(id) === handle) {
+            const tabs = (yield* SubscriptionRef.get(state)).tabs
+            if (!tabs.some((tab) => tab.id === id)) yield* Effect.forkDetach(discard(id))
+          }
         })
 
-      const handlers = (id: string) => ({
+      /** Notes the log entry behind a notification as applied, once its effect is in the store. */
+      const applied = (handle: Live, params: unknown) => Effect.sync(() => noteApplied(handle, logSeqOf(params)))
+
+      /** The client side of one connection; bound to its handle so a replaced one can't touch the new one. */
+      const handlers = (id: string, handle: Live) => ({
         // A replay rebuilds history we already have; session-level updates (commands, modes) still apply.
         onUpdate: (notification: acp.SessionNotification) =>
-          live.get(id)?.replaying && isHistory(notification.update)
+          (handle.replaying && isHistory(notification.update)
             ? Effect.void
-            : updateSession(id, (session) => applyUpdate(session, notification.update)),
+            : updateSession(id, (session) => applyUpdate(session, notification.update))
+          ).pipe(Effect.andThen(applied(handle, notification))),
         onPermission: (request: acp.RequestPermissionRequest) =>
-          ask<acp.RequestPermissionResponse>(id, {
+          ask<acp.RequestPermissionResponse>(id, handle, {
             _tag: "Permission",
             toolCall: request.toolCall,
             options: request.options,
           }),
-        onExtension: onExtension(id),
-        onExtensionNotification: onExtensionNotification(id),
-        onTurnEnd: endTurn(id),
+        onExtension: onExtension(id, handle),
+        onExtensionNotification: (method: string, params: Record<string, unknown>) =>
+          onExtensionNotification(id, handle)(method, params).pipe(Effect.andThen(applied(handle, params))),
+        onTurnEnd: endTurn(id, handle),
       })
 
       /**
@@ -496,8 +539,8 @@ export class Workspace extends Context.Service<
           const session = yield* getSession(id)
           const spec = agents[session.agentId]
           const process = yield* host.attach(id, session.logSeq)
-          handle.lastSeq = process.lastSeq
-          const connection = yield* acpClient.connect(process, handlers(id))
+          yield* stillWanted(id, handle)
+          const connection = yield* acpClient.connect(process, handlers(id, handle))
           yield* watchExit(id, handle, process, spec.name)
           const resumed = (running.session ?? {}) as Partial<acp.NewSessionResponse>
           yield* updateSession(id, (current) => ({
@@ -516,15 +559,16 @@ export class Workspace extends Context.Service<
         })
 
       /** A logged notification from the daemon, applied the way the live connection would. */
-      const applyLogged = (id: string, message: unknown) => {
+      const applyLogged = (id: string, handle: Live, message: unknown) => {
         const { method, params } = message as { method?: string; params?: Record<string, unknown> }
-        const on = handlers(id)
+        const on = handlers(id, handle)
         if (!method || !params) return Effect.void
         if (method === "session/update") return on.onUpdate(params as unknown as acp.SessionNotification)
         if (method === "_termy/turn_end") {
           return on.onTurnEnd({
             stopReason: (params.stopReason as acp.StopReason | null | undefined) ?? null,
             error: (params.error as TurnEnd["error"] | undefined) ?? null,
+            logSeq: null,
           })
         }
         return on.onExtensionNotification(method, params)
@@ -537,27 +581,39 @@ export class Workspace extends Context.Service<
       const collect = (id: string, handle: Live) =>
         Effect.gen(function* () {
           const { messages, lastSeq } = yield* host.backlog(id, (yield* getSession(id)).logSeq)
-          for (const message of messages) yield* applyLogged(id, message)
-          handle.lastSeq = () => lastSeq
+          for (const message of messages) yield* applyLogged(id, handle, message)
+          handle.logSeq = lastSeq
           yield* persist(id)
           yield* host.kill(id)
         })
+
+      /**
+       * Stops an `establish` whose thread let go of it meanwhile (discarded, retried, window closed),
+       * so it doesn't attach to, or report on, an agent that belongs to someone else now.
+       */
+      const stillWanted = (id: string, handle: Live) => (live.get(id) === handle ? Effect.void : Effect.interrupt)
 
       /** Spawns the agent, then resumes, replays or starts the ACP session. */
       const establish = (id: string, handle: Live) =>
         Effect.gen(function* () {
           const running = (yield* host.list()).find((agent) => agent.key === id)
-          if (running?.alive) return yield* reattach(id, handle, running)
+          if (running?.alive) {
+            yield* Deferred.succeed(handle.spawned, undefined)
+            return yield* reattach(id, handle, running)
+          }
           if (running) yield* collect(id, handle)
 
+          yield* stillWanted(id, handle)
           const session = yield* getSession(id)
           const spec = agents[session.agentId]
           // A new process starts a new log.
           yield* updateSession(id, (current) => ({ ...current, logSeq: 0 }))
-          handle.lastSeq = () => 0
-          const process = yield* host.spawn(id, spec, session.cwd)
-          handle.lastSeq = process.lastSeq
-          const connection = yield* acpClient.connect(process, handlers(id))
+          handle.logSeq = 0
+          const process = yield* host
+            .spawn(id, spec, session.cwd)
+            .pipe(Effect.ensuring(Deferred.succeed(handle.spawned, undefined)))
+          yield* stillWanted(id, handle)
+          const connection = yield* acpClient.connect(process, handlers(id, handle))
 
           let resumed: acp.ResumeSessionResponse | acp.NewSessionResponse | acp.ForkSessionResponse
           let acpSessionId = session.acpSessionId
@@ -613,6 +669,7 @@ export class Workspace extends Context.Service<
           return connection
         }).pipe(
           Scope.provide(handle.scope),
+          Effect.ensuring(Deferred.succeed(handle.spawned, undefined)),
           Effect.catch((error) =>
             Effect.gen(function* () {
               const session = yield* getSession(id)
@@ -637,10 +694,12 @@ export class Workspace extends Context.Service<
         const handle: Live = {
           scope: yield* Scope.make(),
           ready: yield* Deferred.make<AcpConnection, WorkspaceError>(),
-          request: null,
+          spawned: yield* Deferred.make<void>(),
+          requests: [],
           todos: [],
           replaying: false,
-          lastSeq: () => 0,
+          logSeq: (yield* SubscriptionRef.get(state)).sessions[id]?.logSeq ?? 0,
+          closeWhenIdle: false,
         }
         live.set(id, handle)
         yield* updateSession(id, (session) => ({ ...session, status: "starting", error: null }))
@@ -648,7 +707,7 @@ export class Workspace extends Context.Service<
         const exit = yield* Effect.exit(establish(id, handle))
         yield* Deferred.done(handle.ready, exit)
         if (Exit.isFailure(exit)) {
-          live.delete(id)
+          if (live.get(id) === handle) live.delete(id)
           yield* Scope.close(handle.scope, Exit.void)
         }
         return yield* exit
@@ -662,8 +721,10 @@ export class Workspace extends Context.Service<
         const handle = live.get(id)
         if (handle) {
           live.delete(id)
-          if (stop && handle.request) yield* Deferred.succeed(handle.request, cancelled)
+          if (stop) yield* cancelRequests(id, handle)
           yield* Scope.close(handle.scope, Exit.void)
+          // A kill sent while the agent is still being spawned could reach the daemon first.
+          if (stop) yield* Deferred.await(handle.spawned)
         }
         if (stop) yield* host.kill(id)
       })
@@ -781,7 +842,9 @@ export class Workspace extends Context.Service<
         connection.prompt(acpSessionId, prompt).pipe(
           Effect.asVoid,
           Effect.catch((error) =>
-            error.code === -1 ? endTurn(id)({ stopReason: null, error: { message: error.message } }) : Effect.void,
+            error.code === -1
+              ? endTurn(id)({ stopReason: null, error: { message: error.message }, logSeq: null })
+              : Effect.void,
           ),
         )
 
@@ -812,27 +875,34 @@ export class Workspace extends Context.Service<
         }))
         yield* persist(id)
 
-        const connection = yield* ensureConnected(id).pipe(
-          Effect.tapError(() =>
-            updateSession(id, (session) => ({ ...session, turnStartedAt: null })),
+        yield* Effect.gen(function* () {
+          const connection = yield* ensureConnected(id)
+          const session = yield* getSession(id)
+          const handle = live.get(id)
+          if (!session.acpSessionId || !handle) {
+            return yield* new WorkspaceError({ message: "The agent session isn't ready yet." })
+          }
+          if (images.length > 0 && !session.supportsImages) {
+            return yield* new WorkspaceError({ message: `${agents[session.agentId].name} doesn't accept images.` })
+          }
+          // The first prompt after a handoff carries the conversation it came from.
+          const items = session.items.slice(0, -1)
+          const fork = pendingFork(items)
+          const context =
+            fork?.handoff === "transcript" ? transcript(items, fork, agents[fork.fromAgentId].name) : undefined
+          yield* Effect.forkIn(
+            runTurn(id, connection, session.acpSessionId, { text: trimmed, images, mentions, context }),
+            handle.scope,
+          )
+        }).pipe(
+          // The prompt never reached the agent, so no turn end is coming to stop the spinner.
+          Effect.onError(() =>
+            updateSession(id, (session) => ({
+              ...session,
+              status: session.status === "working" ? "ready" : session.status,
+              turnStartedAt: null,
+            })),
           ),
-        )
-        const session = yield* getSession(id)
-        const handle = live.get(id)
-        if (!session.acpSessionId || !handle) {
-          return yield* new WorkspaceError({ message: "The agent session isn't ready yet." })
-        }
-        if (images.length > 0 && !session.supportsImages) {
-          return yield* new WorkspaceError({ message: `${agents[session.agentId].name} doesn't accept images.` })
-        }
-        // The first prompt after a handoff carries the conversation it came from.
-        const items = session.items.slice(0, -1)
-        const fork = pendingFork(items)
-        const context =
-          fork?.handoff === "transcript" ? transcript(items, fork, agents[fork.fromAgentId].name) : undefined
-        yield* Effect.forkIn(
-          runTurn(id, connection, session.acpSessionId, { text: trimmed, images, mentions, context }),
-          handle.scope,
         )
       })
 
@@ -840,7 +910,7 @@ export class Workspace extends Context.Service<
         const handle = live.get(id)
         const session = (yield* SubscriptionRef.get(state)).sessions[id]
         if (!handle || !session?.acpSessionId) return
-        if (handle.request) yield* Deferred.succeed(handle.request, cancelled)
+        yield* cancelRequests(id, handle)
         const connection = yield* Deferred.await(handle.ready).pipe(Effect.option)
         if (connection._tag === "Some") yield* connection.value.cancel(session.acpSessionId).pipe(Effect.ignore)
       })
@@ -979,7 +1049,10 @@ export class Workspace extends Context.Service<
         // A terminal tab's shell runs in the daemon until its tab closes.
         if (tab?._tag === "Terminal") yield* shells.close(id)
         const session = (yield* SubscriptionRef.get(state)).sessions[id]
-        if (session && session.status !== "working") yield* discard(id)
+        if (!session) return
+        if (session.status !== "working") return yield* discard(id)
+        const handle = live.get(id)
+        if (handle) handle.closeWhenIdle = true
       })
 
       /** Ends the shells in a thread's side panel, which are keyed `<thread id>:panel:<n>`. */
@@ -1053,7 +1126,7 @@ export class Workspace extends Context.Service<
                     status: "failed",
                     turnStartedAt: null,
                     request: null,
-                    error: "Termy Code's background service stopped. Retry to start the agent again.",
+                    error: "Vestle's background service stopped. Retry to start the agent again.",
                     items: settleTools(session.items),
                   })),
                 ),

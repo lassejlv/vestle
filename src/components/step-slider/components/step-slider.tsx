@@ -144,7 +144,7 @@ export const StepSlider = ({
         <SliderPrimitive.Control className="relative h-full cursor-pointer touch-none select-none data-disabled:cursor-not-allowed data-disabled:opacity-50">
           <SliderPrimitive.Track className="absolute inset-0 h-full">
             <SliderPrimitive.Indicator
-              className="box-content overflow-hidden rounded-full bg-linear-to-r from-[#C97E12] to-amber pe-4 shadow-[inset_0_0.0625rem_0_#FFFFFF33] transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+              className="box-content overflow-hidden rounded-full bg-linear-to-r from-[#8a8a8f] to-amber pe-4 shadow-[inset_0_0.0625rem_0_#FFFFFF33] transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
               data-slot="step-slider-indicator"
             >
               <span className="absolute inset-0 bg-[radial-gradient(circle,#FFF4DC40_0.75px,transparent_1.25px)] bg-size-[0.375rem_0.375rem] bg-center" />

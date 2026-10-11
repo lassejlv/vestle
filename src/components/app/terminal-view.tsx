@@ -1,10 +1,4 @@
-import { ClipboardAddon } from "@xterm/addon-clipboard"
-import { FitAddon } from "@xterm/addon-fit"
-import { Unicode11Addon } from "@xterm/addon-unicode11"
-import { WebLinksAddon } from "@xterm/addon-web-links"
-import { WebglAddon } from "@xterm/addon-webgl"
-import { type ITerminalOptions, Terminal } from "@xterm/xterm"
-import "@xterm/xterm/css/xterm.css"
+import { Terminal, type TerminalOptions } from "@termysh/web"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import { Effect, Exit, Scope } from "effect"
 import { useEffect, useRef, useState } from "react"
@@ -25,9 +19,9 @@ const theme = {
   // Transparent, so the panel behind shows through, glass included.
   background: "#00000000",
   foreground: "#ece9e4",
-  cursor: "#ffb224",
+  cursor: "#ffffff",
   cursorAccent: "#0c0c0d",
-  selectionBackground: "rgba(255, 178, 36, 0.25)",
+  selectionBackground: "rgba(255, 255, 255, 0.25)",
   black: "#1b1b1e",
   red: "#f0605a",
   green: "#4cc38a",
@@ -58,8 +52,8 @@ const zoomed = (event: KeyboardEvent, size: number): number | null => {
   return null
 }
 
-/** The xterm options the Terminal settings control. */
-const optionsFrom = (settings: Settings): ITerminalOptions => ({
+/** The terminal options the Terminal settings control. */
+const optionsFrom = (settings: Settings): TerminalOptions => ({
   fontFamily: fontStack(settings.termFont, CODE_FALLBACK),
   fontSize: settings.termFontSize,
   lineHeight: settings.termLineHeight,
@@ -73,12 +67,12 @@ const optionsFrom = (settings: Settings): ITerminalOptions => ({
   minimumContrastRatio: settings.termMinContrast,
   scrollback: settings.termScrollback,
   macOptionIsMeta: settings.termOptionAsMeta,
+  copyOnSelect: settings.termCopyOnSelect,
 })
 
 /**
- * Resolves once the terminal font (regular and bold) is loaded. xterm measures
- * the cell size from the font it has when it opens, so measuring a fallback
- * font misaligns every column once the real one arrives.
+ * Loads the terminal font (regular and bold). The terminal draws on a canvas, which
+ * doesn't ask for a web font by itself; once it's loaded the terminal re-measures its cells.
  */
 const fontReady = (settings: Settings) => {
   const family = fontStack(settings.termFont, CODE_FALLBACK)
@@ -92,23 +86,9 @@ const fontReady = (settings: Settings) => {
   )
 }
 
-/** WebGL rendering, or `null` to stay on the DOM renderer (no WebGL2, or the context was lost). */
-const loadWebgl = (xterm: Terminal, onLost: () => void): WebglAddon | null => {
-  try {
-    const webgl = new WebglAddon()
-    xterm.loadAddon(webgl)
-    webgl.onContextLoss(() => {
-      webgl.dispose()
-      onLost()
-    })
-    return webgl
-  } catch {
-    return null
-  }
-}
-
 /**
- * A shell in the project folder: Termy's background daemon runs the PTY, xterm.js draws it.
+ * A shell in the project folder: the background daemon runs the PTY on libtermy, and
+ * libtermy's web terminal (the same engine compiled to WebAssembly) parses and draws it.
  * The shell is found again by `shellKey`, so it survives this view unmounting and the app quitting.
  */
 export const TerminalView = ({
@@ -130,17 +110,11 @@ export const TerminalView = ({
   const container = useRef<HTMLDivElement>(null)
   const titleListener = useRef(onTitleChange)
   titleListener.current = onTitleChange
-  const fitRef = useRef<FitAddon | null>(null)
-  const xtermRef = useRef<Terminal | null>(null)
-  const webglRef = useRef<WebglAddon | null>(null)
+  const terminalRef = useRef<Terminal | null>(null)
   const activeRef = useRef(active)
   activeRef.current = active
   const [generation, setGeneration] = useState(0)
   const settings = useSettings()
-  /** Falls back to the DOM renderer if the GPU drops the context, until the GPU setting is applied again. */
-  const gpuLost = () => {
-    webglRef.current = null
-  }
 
   useEffect(() => {
     const element = container.current
@@ -149,25 +123,17 @@ export const TerminalView = ({
     let teardown: (() => void) | undefined
 
     const start = () => {
-      const xterm = new Terminal({
+      const terminal = new Terminal({
         ...optionsFrom(getSettings()),
         theme,
         allowTransparency: true,
-        allowProposedApi: true,
-        // Box drawing and Powerline glyphs drawn to the cell, so borders meet at any line height.
+        // Box drawing and block glyphs drawn to the cell, so borders meet at any line height.
         customGlyphs: true,
-        // Icons wider than one cell (Nerd Font symbols) shrink to fit instead of overlapping.
-        rescaleOverlappingGlyphs: true,
+        linkHandler: { activate: (_event, uri) => void openUrl(uri) },
+        // OSC 52, so tmux, vim and ssh sessions can copy to the system clipboard.
+        allowClipboardWrite: true,
       })
-      const fit = new FitAddon()
-      xterm.loadAddon(fit)
-      xterm.loadAddon(new WebLinksAddon((_event, uri) => void openUrl(uri)))
-      // OSC 52, so tmux, vim and ssh sessions can copy to the system clipboard.
-      xterm.loadAddon(new ClipboardAddon())
-      // Unicode 11 widths: emoji and CJK take two columns, like the shell expects.
-      xterm.loadAddon(new Unicode11Addon())
-      xterm.unicode.activeVersion = "11"
-      xterm.attachCustomKeyEventHandler((event) => {
+      terminal.attachCustomKeyEventHandler((event) => {
         const size = zoomed(event, getSettings().termFontSize)
         if (size === null) return true
         if (event.type === "keydown") {
@@ -177,21 +143,12 @@ export const TerminalView = ({
         }
         return false
       })
-      xterm.onTitleChange((title) => titleListener.current?.(title))
-      xterm.open(element)
-      if (getSettings().termGpu) webglRef.current = loadWebgl(xterm, gpuLost)
-      fit.fit()
+      terminal.onTitleChange((title) => titleListener.current?.(title))
+      // Follows the element's size from here on (`autoFit`).
+      terminal.open(element)
       // A restart comes from a keypress in this terminal, and the first open comes from showing it.
-      if (generation > 0 || activeRef.current) xterm.focus()
-      fitRef.current = fit
-      xtermRef.current = xterm
-
-      const copyOnSelect = () => {
-        if (getSettings().termCopyOnSelect && xterm.hasSelection()) {
-          void navigator.clipboard.writeText(xterm.getSelection()).catch(() => undefined)
-        }
-      }
-      element.addEventListener("mouseup", copyOnSelect)
+      if (generation > 0 || activeRef.current) terminal.focus()
+      terminalRef.current = terminal
 
       const scope = runtime.runSync(Scope.make())
       let disposed = false
@@ -201,24 +158,29 @@ export const TerminalView = ({
         .runPromise(
           Effect.gen(function* () {
             const host = yield* TerminalHost
+            // The engine loads in the background; the shell should start at the fitted size.
+            yield* Effect.promise(() => terminal.ready)
+            terminal.fit()
             // After the shell exited, a keypress starts a new one under the same key.
             if (generation > 0) yield* host.close(shellKey)
             const session = yield* host.open({
               key: shellKey,
               cwd,
-              cols: xterm.cols,
-              rows: xterm.rows,
-              onOutput: (bytes) => xterm.write(bytes),
+              cols: terminal.cols,
+              rows: terminal.rows,
+              onOutput: (bytes) => terminal.write(bytes),
               onExit: () => {
                 ended = true
-                xterm.write("\r\n\x1b[2mShell exited. Press any key to start a new one.\x1b[0m\r\n")
+                terminal.processExited()
+                terminal.write("\r\n\x1b[2mShell exited. Press any key to start a new one.\x1b[0m\r\n")
               },
             })
-            const typing = xterm.onData((data) => {
+            // Keys, pastes and the terminal's replies to queries all go to the shell.
+            const typing = terminal.onData((data) => {
               if (ended) setGeneration((value) => value + 1)
               else void runtime.runPromise(Effect.ignore(session.write(data)))
             })
-            const resizing = xterm.onResize(({ cols, rows }) =>
+            const resizing = terminal.onResize(({ cols, rows }) =>
               void runtime.runPromise(Effect.ignore(session.resize(cols, rows))),
             )
             yield* Effect.addFinalizer(() =>
@@ -230,23 +192,14 @@ export const TerminalView = ({
           }).pipe(Scope.provide(scope)),
         )
         .catch((error: unknown) => {
-          if (!disposed) xterm.write(`\r\n\x1b[31m${error instanceof Error ? error.message : String(error)}\x1b[0m\r\n`)
+          if (!disposed) terminal.write(`\r\n\x1b[31m${error instanceof Error ? error.message : String(error)}\x1b[0m\r\n`)
         })
-
-      const observer = new ResizeObserver(() => {
-        if (element.offsetWidth > 0) fit.fit()
-      })
-      observer.observe(element)
 
       return () => {
         disposed = true
-        observer.disconnect()
-        element.removeEventListener("mouseup", copyOnSelect)
         void runtime.runPromise(Scope.close(scope, Exit.void))
-        xterm.dispose()
-        xtermRef.current = null
-        fitRef.current = null
-        webglRef.current = null
+        terminal.dispose()
+        terminalRef.current = null
       }
     }
 
@@ -260,22 +213,11 @@ export const TerminalView = ({
     }
   }, [shellKey, cwd, generation])
 
-  // Settings apply to running terminals; a new font is loaded before xterm re-measures.
+  // Settings apply to running terminals, which re-measure and refit; a new font is loaded first.
   useEffect(() => {
     let cancelled = false
     void fontReady(settings).then(() => {
-      const xterm = xtermRef.current
-      if (cancelled || !xterm) return
-      const options = optionsFrom(settings)
-      for (const key of Object.keys(options) as Array<keyof ITerminalOptions>) {
-        if (xterm.options[key] !== options[key]) Object.assign(xterm.options, { [key]: options[key] })
-      }
-      if (settings.termGpu && !webglRef.current) webglRef.current = loadWebgl(xterm, gpuLost)
-      if (!settings.termGpu && webglRef.current) {
-        webglRef.current.dispose()
-        webglRef.current = null
-      }
-      fitRef.current?.fit()
+      if (!cancelled) terminalRef.current?.setOptions(optionsFrom(settings))
     })
     return () => {
       cancelled = true
@@ -284,14 +226,14 @@ export const TerminalView = ({
 
   useEffect(() => {
     if (!active) return
-    fitRef.current?.fit()
-    xtermRef.current?.focus()
+    terminalRef.current?.fit()
+    terminalRef.current?.focus()
   }, [active])
 
-  // FitAddon measures the element xterm opens in, padding included, so the padding sits outside it.
+  // The terminal fills the element it opens in, so the padding sits outside it.
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col px-3 pt-1 pb-2", className)}>
-      <div ref={container} className="selectable min-h-0 flex-1" />
+      <div ref={container} data-terminal className="selectable min-h-0 flex-1" />
     </div>
   )
 }

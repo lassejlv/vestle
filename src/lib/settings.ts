@@ -32,8 +32,6 @@ const fields = {
   termScrollback: Between(1000, 100000),
   termOptionAsMeta: Schema.Boolean,
   termCopyOnSelect: Schema.Boolean,
-  /** WebGL draws crisper glyphs and seamless box lines; off falls back to the DOM renderer. */
-  termGpu: Schema.Boolean,
 }
 
 export type Settings = { readonly [K in keyof typeof fields]: (typeof fields)[K]["Type"] }
@@ -62,7 +60,6 @@ export const defaultSettings: Settings = {
   termScrollback: 5000,
   termOptionAsMeta: true,
   termCopyOnSelect: false,
-  termGpu: true,
 }
 
 export interface FontChoice {

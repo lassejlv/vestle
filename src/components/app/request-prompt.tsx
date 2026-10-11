@@ -121,7 +121,7 @@ const Question = ({ session, request }: { session: Session; request: Extract<Pen
                     className={cn(
                       "flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs transition-colors",
                       active
-                        ? "bg-amber/15 text-text shadow-[inset_0_0_0_1px_rgb(255_178_36/0.45)]"
+                        ? "bg-amber/15 text-text shadow-[inset_0_0_0_1px_rgb(255_255_255/0.45)]"
                         : "text-text-2 hover:text-text bg-white/5 hover:bg-white/8",
                     )}
                   >

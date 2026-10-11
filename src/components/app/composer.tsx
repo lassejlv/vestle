@@ -43,7 +43,7 @@ const useNow = (active: boolean) => {
  */
 const escapeBelongsElsewhere = (event: KeyboardEvent) =>
   event.defaultPrevented ||
-  (event.target instanceof Element && event.target.closest(".xterm") !== null) ||
+  (event.target instanceof Element && event.target.closest("[data-terminal]") !== null) ||
   document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]') !== null
 
 const StatusStrip = ({ session }: { session: Session }) => {

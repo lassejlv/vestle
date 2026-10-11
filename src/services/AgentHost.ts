@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
-import { Context, Deferred, Effect, Layer, Schema, type Scope } from "effect"
+import { Context, Deferred, Effect, Layer, Predicate, Schema, type Scope } from "effect"
 import type { AgentSpec } from "@/domain/agents"
 import { isHistory } from "@/domain/session"
 import { Daemon } from "./Daemon"
@@ -47,6 +47,26 @@ const decodeEntry = Schema.decodeUnknownOption(EntryEvent)
 const decodeMessage = Schema.decodeUnknownOption(MessageEvent)
 const decodeExit = Schema.decodeUnknownOption(ExitEvent)
 
+/**
+ * Where a logged notification carries its log entry number into the client, so the window
+ * knows which entries it has applied, not just which it has queued.
+ */
+const LOG_SEQ = "termy/logSeq"
+
+const decodeLogSeq = Schema.decodeUnknownOption(Schema.Struct({ _meta: Schema.Struct({ [LOG_SEQ]: Schema.Number }) }))
+
+/** The log entry a notification's params came from, if it came from the log. */
+export const logSeqOf = (params: unknown): number | null => {
+  const decoded = decodeLogSeq(params)
+  return decoded._tag === "Some" ? decoded.value._meta[LOG_SEQ] : null
+}
+
+const withLogSeq = ({ message, seq }: Entry): acp.AnyMessage => {
+  if (!Predicate.isObject(message) || !Predicate.isObject(message.params)) return message as acp.AnyMessage
+  const meta = Predicate.isObject(message.params._meta) ? message.params._meta : {}
+  return { ...message, params: { ...message.params, _meta: { ...meta, [LOG_SEQ]: seq } } } as acp.AnyMessage
+}
+
 /** A running agent process with its stdio exposed as an ACP message stream. */
 export interface AgentProcess {
   readonly stream: acp.Stream
@@ -54,8 +74,6 @@ export interface AgentProcess {
   readonly exited: Deferred.Deferred<number | null>
   /** The last lines the agent wrote to stderr, for error messages. */
   readonly stderrTail: () => string
-  /** The highest log entry handed to the stream; what's saved up to it needn't be replayed. */
-  readonly lastSeq: () => number
   /** How the agent stood when attached: its handshake, session and any turn in flight. */
   readonly summary: AgentSummary
 }
@@ -134,7 +152,7 @@ export class AgentHost extends Context.Service<
         const deliver = (entry: Entry) => {
           if (entry.seq <= lastSeq) return
           lastSeq = entry.seq
-          if (!isReplayedHistory(entry)) push(entry.message as acp.AnyMessage)
+          if (!isReplayedHistory(entry)) push(withLogSeq(entry))
         }
         const end = (code: number | null, tail: string) => {
           stderr = tail
@@ -155,8 +173,9 @@ export class AgentHost extends Context.Service<
           Effect.mapError((error) => new SpawnError({ agent, message: error.message })),
         )
         stderr = snapshot.stderr
-        for (const update of snapshot.latest) push(update as acp.AnyMessage)
         for (const entry of snapshot.entries) deliver(entry)
+        // The newest of each, so they go after the log, which may hold older ones.
+        for (const update of snapshot.latest) push(update as acp.AnyMessage)
         for (const request of snapshot.pending) push(request as acp.AnyMessage)
         const route: Route = {
           entry: deliver,
@@ -188,7 +207,6 @@ export class AgentHost extends Context.Service<
           stream: { readable, writable },
           exited,
           stderrTail: () => stderr,
-          lastSeq: () => lastSeq,
           summary: snapshot,
         } satisfies AgentProcess
       })
@@ -207,8 +225,8 @@ export class AgentHost extends Context.Service<
         const entries = snapshot.value.entries.filter((entry) => entry.seq > after)
         return {
           messages: [
-            ...snapshot.value.latest,
             ...entries.filter((entry) => !isReplayedHistory(entry)).map((entry) => entry.message),
+            ...snapshot.value.latest,
           ],
           lastSeq: Math.max(after, ...entries.map((entry) => entry.seq)),
         }

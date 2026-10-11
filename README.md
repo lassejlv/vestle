@@ -1,17 +1,17 @@
-# Termy Code
+# Vestle
 
-Termy Code is a desktop app for working with AI coding agents. Instead of running Claude Code, Codex and Cursor each in its own terminal tab, you open a project once and talk to any of them from the same window. Each conversation is saved as a thread you can search and return to later.
+Vestle is a desktop app for working with AI coding agents. Instead of running Claude Code, Codex and Cursor each in its own terminal tab, you open a project once and talk to any of them from the same window. Each conversation is saved as a thread you can search and return to later.
 
-When an agent edits files, the changes show up as diffs you can review before moving on. When it runs commands, they run in a real terminal built on [Alacritty](https://github.com/alacritty/alacritty)'s PTY, and you can see the output as it happens. A terminal panel is also there for your own commands.
+When an agent edits files, the changes show up as diffs you can review before moving on. When it runs commands, they run in a real terminal built on [libtermy](https://termy.sh/docs/developer/libtermy), and you can see the output as it happens. A terminal panel is also there for your own commands.
 
-Termy Code talks to the agents over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), the open protocol these CLIs use to work with editors. The agents keep their own models, tools and logins. Termy Code gives them a better interface.
+Vestle talks to the agents over the [Agent Client Protocol](https://agentclientprotocol.com) (ACP), the open protocol these CLIs use to work with editors. The agents keep their own models, tools and logins. Vestle gives them a better interface.
 
 ## Features
 
 - **Multiple agents.** Claude Code, Codex and Cursor connect over ACP.
 - **Projects and threads.** Conversations are saved per project in a local SQLite database, and you can search them.
 - **Tool calls in the timeline.** Agent tool calls are grouped into stacks. You can review file diffs in a side pane.
-- **Built-in terminal.** The terminal panel uses xterm.js on top of Alacritty's native PTY. Commands that agents run through ACP `terminal/*` use the same PTY layer.
+- **Built-in terminal.** The terminal panel uses libtermy: its native PTY in the background service, and its WebAssembly engine (`@termysh/web`) to draw it. Commands that agents run through ACP `terminal/*` use the same PTY layer.
 - **Permission prompts.** Agent requests for permission or input appear inline.
 - **Composer.** You can attach images, switch models and set reasoning effort. Type `@` to mention a file or `$` to use one of the agent's skills.
 - **Command palette.** Jump between projects and threads from the keyboard.
@@ -28,7 +28,7 @@ Termy Code talks to the agents over the [Agent Client Protocol](https://agentcli
 | Codex       | `npx -y @agentclientprotocol/codex-acp`        | `codex login`, or set `OPENAI_API_KEY`          |
 | Cursor      | `agent acp`                                    | `agent login`, or set `CURSOR_API_KEY`          |
 
-macOS starts GUI apps with a minimal `PATH`. Termy Code reads `PATH` from your login shell so that `npx` and `agent` can be found.
+macOS starts GUI apps with a minimal `PATH`. Vestle reads `PATH` from your login shell so that `npx` and `agent` can be found.
 
 ## Development
 
@@ -40,11 +40,11 @@ macOS starts GUI apps with a minimal `PATH`. Termy Code reads `PATH` from your l
 
 ### Setup
 
-The Rust terminal backend uses `alacritty_terminal` from crates.io. No sibling checkout is needed.
+The terminal backend is libtermy: Cargo fetches `termy_core` from GitHub at a pinned commit and Bun installs `@termysh/web`. No sibling checkout is needed.
 
 ```sh
-git clone https://github.com/termylabs/code termycode
-cd termycode
+git clone https://github.com/lassejlv/vestle
+cd vestle
 bun install
 ```
 
@@ -68,7 +68,7 @@ after both architectures pass. See [release setup and verification](docs/macos-r
 src-tauri/          Rust backend (Tauri v2)
 ├── daemon/             persistent agents and interactive shells
 ├── daemon_client.rs    connects the app to the background daemon
-├── pty.rs              raw Alacritty PTY transport and process lifecycle
+├── pty.rs              raw libtermy PTY transport and process lifecycle
 ├── agent_terminal.rs   ACP terminal/* commands with sanitized output
 ├── workspace.rs        ACP fs/* requests, git branch and image attachments
 ├── mentions.rs         project files and agent skills for @ and $ mentions
@@ -89,4 +89,4 @@ src/                React frontend
 
 ## Stack
 
-[Tauri 2](https://v2.tauri.app) · [React 19](https://react.dev) · [Effect](https://effect.website) · [TanStack Router](https://tanstack.com/router) · [Tailwind CSS 4](https://tailwindcss.com) · [Base UI](https://base-ui.com) · [xterm.js](https://xtermjs.org) · [SQLite](https://sqlite.org)
+[Tauri 2](https://v2.tauri.app) · [React 19](https://react.dev) · [Effect](https://effect.website) · [TanStack Router](https://tanstack.com/router) · [Tailwind CSS 4](https://tailwindcss.com) · [Base UI](https://base-ui.com) · [libtermy](https://termy.sh/docs/developer/libtermy) · [SQLite](https://sqlite.org)

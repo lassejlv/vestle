@@ -1,12 +1,12 @@
 [package]
-name = "termy-code"
+name = "vestle"
 version = "0.1.0"
-description = "Termy Code: a desktop client for ACP coding agents"
+description = "Vestle: a desktop client for ACP coding agents"
 authors = ["Lasse Vestergaard"]
 edition = "2021"
 
 [lib]
-name = "termy_code_lib"
+name = "vestle_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -22,8 +22,8 @@ base64 = "0.22"
 ignore = "0.4"
 tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt-multi-thread", "time", "net", "fs"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
-alacritty_terminal = { version = "0.26", default-features = false }
-polling = "3"
+# libtermy's PTY process layer only. Beta: keep the pinned commit and test upgrades.
+termy_core = { git = "https://github.com/lassejlv/termy", rev = "c269bc96fa82d3f1a287ff118342ac54a1c3e82c", default-features = false, features = ["pty"] }
 libc = "0.2"
 tauri-plugin-updater = "2.13.1"
 tauri-plugin-process = "2"

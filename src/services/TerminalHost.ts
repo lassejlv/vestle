@@ -12,7 +12,7 @@ const ExitEvent = Schema.Struct({ key: Schema.String })
 const decodeOutput = Schema.decodeUnknownOption(OutputEvent)
 const decodeExit = Schema.decodeUnknownOption(ExitEvent)
 
-/** Shell output travels base64-encoded; xterm.js wants the raw bytes. */
+/** Shell output travels base64-encoded; the web terminal wants the raw bytes. */
 const bytesOf = (base64: string) => Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
 
 interface Route {
@@ -21,8 +21,8 @@ interface Route {
 }
 
 /**
- * Shells run by the background daemon on Alacritty's PTY, so they outlive the window.
- * Output arrives as raw bytes for xterm.js.
+ * Shells run by the background daemon on libtermy's PTY, so they outlive the window.
+ * Output arrives as raw bytes for the web terminal.
  */
 export class TerminalHost extends Context.Service<
   TerminalHost,
@@ -56,6 +56,12 @@ export class TerminalHost extends Context.Service<
       yield* daemon.on("shell.exit", (data) => {
         const event = decodeExit(data)
         if (event._tag === "Some") routes.get(event.value.key)?.exit()
+      })
+      // The daemon took every shell with it; show them as exited, so a keypress starts a new one.
+      yield* daemon.onDisconnect(() => {
+        const ended = [...routes.values()]
+        routes.clear()
+        for (const route of ended) route.exit()
       })
 
       const open = Effect.fn("TerminalHost.open")(function* (options: {

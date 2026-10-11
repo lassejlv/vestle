@@ -293,7 +293,7 @@ async fn dispatch(daemon: &Arc<Daemon>, conn: ConnId, method: &str, params: Valu
             daemon.agents.detach(conn, &string(&params, "key")?);
             Ok(Value::Null)
         }
-        "agent.send" => daemon.send_to_agent(conn, &string(&params, "key")?, param(&params, "message")?.clone()).await,
+        "agent.send" => daemon.send_to_agent(conn, &string(&params, "key")?, param(&params, "message")?.clone()),
         "agent.ack" => {
             daemon.agents.ack(&string(&params, "key")?, number(&params, "seq")?);
             Ok(Value::Null)
@@ -351,6 +351,34 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": m["id"], "result": {"stopReason": "end_turn"}})
 "#;
 
+    /// One data folder for every test in this run, set before any daemon reads it, so agent
+    /// logs never land in the real app's folder. Tests use their own agent keys within it.
+    fn test_data_dir() -> &'static Path {
+        static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        DIR.get_or_init(|| {
+            let dir = std::env::temp_dir().join(format!("termy-daemon-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::env::set_var("TERMY_DATA_DIR", &dir);
+            dir
+        })
+    }
+
+    /// The agent's entry in `agent.list`.
+    async fn listed(daemon: &Arc<Daemon>, key: &str) -> Value {
+        let list = dispatch(daemon, 0, "agent.list", Value::Null).await.unwrap();
+        list.as_array().unwrap().iter().find(|agent| agent["key"] == key).cloned().expect("listed")
+    }
+
+    async fn spawn_python(daemon: &Arc<Daemon>, key: &str, script: &str) {
+        let spawn = json!({
+            "key": key,
+            "command": "python3",
+            "args": ["-c", script],
+            "cwd": test_data_dir().to_str().unwrap(),
+        });
+        dispatch(daemon, 0, "agent.spawn", spawn).await.unwrap();
+    }
+
     async fn next_event(inbox: &mut mpsc::UnboundedReceiver<String>, name: &str) -> Value {
         loop {
             let frame = tokio::time::timeout(Duration::from_secs(5), inbox.recv())
@@ -366,9 +394,7 @@ for line in sys.stdin:
 
     #[tokio::test(flavor = "multi_thread")]
     async fn agent_keeps_working_without_a_window_and_replays_to_the_next_one() {
-        let dir = std::env::temp_dir().join(format!("termy-daemon-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("TERMY_DATA_DIR", &dir);
+        let dir = test_data_dir();
         let file = dir.join("notes.txt");
         std::fs::write(&file, "hello from disk").unwrap();
 
@@ -399,8 +425,7 @@ for line in sys.stdin:
         // The window goes away mid-turn, with the agent blocked on a permission prompt.
         daemon.hub.remove(1);
         daemon.agents.detach_all(1);
-        let listed = dispatch(&daemon, 2, "agent.list", Value::Null).await.unwrap();
-        assert!(listed[0]["turn"].is_object(), "the turn is still running");
+        assert!(listed(&daemon, "thread-1").await["turn"].is_object(), "the turn is still running");
 
         let (second, mut second_inbox) = mpsc::unbounded_channel();
         daemon.hub.add(2, second);
@@ -427,17 +452,134 @@ for line in sys.stdin:
         assert_eq!(ended["entry"]["message"]["method"], "_termy/turn_end");
         assert_eq!(ended["entry"]["message"]["params"]["stopReason"], "end_turn");
 
-        let listed = dispatch(&daemon, 2, "agent.list", Value::Null).await.unwrap();
-        assert!(listed[0]["turn"].is_null());
-        assert_eq!(listed[0]["lastSeq"], 4);
+        let agent = listed(&daemon, "thread-1").await;
+        assert!(agent["turn"].is_null());
+        assert_eq!(agent["lastSeq"], 4);
 
         daemon.kill_agent("thread-1");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_the_first_answer_to_an_agent_request_reaches_it() {
+        // Asks once, then reports every line it reads.
+        const ECHO_AGENT: &str = r#"
+import sys, json
+def send(m):
+    sys.stdout.write(json.dumps(m) + "\n"); sys.stdout.flush()
+send({"jsonrpc": "2.0", "id": "ask", "method": "session/request_permission", "params": {"sessionId": "s"}})
+for line in sys.stdin:
+    send({"jsonrpc": "2.0", "method": "echo", "params": {"got": json.loads(line)}})
+"#;
+        test_data_dir();
+        let daemon = Daemon::new();
+        let (first, mut first_inbox) = mpsc::unbounded_channel();
+        daemon.hub.add(1, first);
+        spawn_python(&daemon, "thread-answers", ECHO_AGENT).await;
+        let attach = json!({ "key": "thread-answers", "after": 0 });
+        dispatch(&daemon, 1, "agent.attach", attach.clone()).await.unwrap();
+        let ask = next_event(&mut first_inbox, "agent.message").await;
+        assert_eq!(ask["message"]["id"], "ask");
+        let pending = dispatch(&daemon, 2, "agent.attach", attach).await.unwrap()["pending"].clone();
+        assert_eq!(pending[0]["id"], "ask", "both windows are shown the prompt");
+
+        // Both windows answer; then a marker, to know when the agent has read everything.
+        let send = |message: Value| json!({ "key": "thread-answers", "message": message });
+        let answer = |outcome: &str| send(json!({ "jsonrpc": "2.0", "id": "ask", "result": { "outcome": outcome } }));
+        dispatch(&daemon, 1, "agent.send", answer("first")).await.unwrap();
+        dispatch(&daemon, 2, "agent.send", answer("second")).await.unwrap();
+        dispatch(&daemon, 1, "agent.send", send(json!({ "jsonrpc": "2.0", "method": "marker" }))).await.unwrap();
+
+        let mut answers = Vec::new();
+        loop {
+            let got = next_event(&mut first_inbox, "agent.entry").await["entry"]["message"]["params"]["got"].clone();
+            if got["method"] == "marker" {
+                break;
+            }
+            answers.push(got["result"]["outcome"].clone());
+        }
+        assert_eq!(answers, vec![json!("first")]);
+        daemon.kill_agent("thread-answers");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_that_stops_reading_doesnt_hold_up_the_window() {
+        test_data_dir();
+        let daemon = Daemon::new();
+        spawn_python(&daemon, "thread-stuck", "import time; time.sleep(30)").await;
+        // Far more than a pipe holds, so writing it inline would block until the agent reads.
+        let big = json!({
+            "key": "thread-stuck",
+            "message": { "jsonrpc": "2.0", "method": "blob", "params": { "data": "x".repeat(4 << 20) } },
+        });
+        for _ in 0..2 {
+            let sent = tokio::time::timeout(Duration::from_secs(2), dispatch(&daemon, 1, "agent.send", big.clone()))
+                .await
+                .expect("agent.send waited on the agent");
+            assert!(sent.is_ok());
+        }
+        daemon.kill_agent("thread-stuck");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_that_dies_mid_turn_ends_the_turn_in_its_log() {
+        const CRASHING_AGENT: &str = r#"
+import sys, json
+for line in sys.stdin:
+    if json.loads(line).get("method") == "session/prompt":
+        sys.stderr.write("Out of credits\n"); sys.stderr.flush()
+        sys.exit(3)
+"#;
+        let prompt = |key: &str| {
+            json!({ "key": key, "message": { "jsonrpc": "2.0", "id": 1, "method": "session/prompt", "params": { "sessionId": "s" } } })
+        };
+        let wait_for_exit = |daemon: Arc<Daemon>, key: &'static str| async move {
+            for _ in 0..100 {
+                if listed(&daemon, key).await["alive"] == false {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            panic!("{key} didn't exit");
+        };
+        test_data_dir();
+        let daemon = Daemon::new();
+
+        // No window open: the log says the turn ended, and why.
+        spawn_python(&daemon, "thread-crash", CRASHING_AGENT).await;
+        dispatch(&daemon, 1, "agent.send", prompt("thread-crash")).await.unwrap();
+        wait_for_exit(daemon.clone(), "thread-crash").await;
+        assert!(listed(&daemon, "thread-crash").await["turn"].is_null());
+        let attached = dispatch(&daemon, 2, "agent.attach", json!({ "key": "thread-crash", "after": 0 })).await.unwrap();
+        let last = attached["entries"].as_array().unwrap().last().cloned().expect("a log entry");
+        assert_eq!(last["message"]["method"], "_termy/turn_end");
+        assert_eq!(last["message"]["params"]["sessionId"], "s");
+        assert_eq!(
+            last["message"]["params"]["error"]["message"],
+            "The agent exited with code 3 during this turn. Out of credits"
+        );
+
+        // A window watching sees the exit itself, so nothing is logged for it.
+        let (watcher, mut inbox) = mpsc::unbounded_channel();
+        daemon.hub.add(3, watcher);
+        spawn_python(&daemon, "thread-crash-watched", CRASHING_AGENT).await;
+        dispatch(&daemon, 3, "agent.attach", json!({ "key": "thread-crash-watched", "after": 0 })).await.unwrap();
+        dispatch(&daemon, 3, "agent.send", prompt("thread-crash-watched")).await.unwrap();
+        let exit = next_event(&mut inbox, "agent.exit").await;
+        assert_eq!(exit["code"], 3);
+        assert!(exit["stderr"].as_str().unwrap().contains("Out of credits"), "stderr drained before the exit");
+        let attached =
+            dispatch(&daemon, 3, "agent.attach", json!({ "key": "thread-crash-watched", "after": 0 })).await.unwrap();
+        assert_eq!(attached["entries"], json!([]));
+
+        daemon.kill_agent("thread-crash");
+        daemon.kill_agent("thread-crash-watched");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_shell_keeps_its_output_for_the_next_window() {
         use base64::Engine;
+        test_data_dir();
         let decode = |data: &Value| {
             String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD.decode(data.as_str().unwrap()).unwrap())
                 .into_owned()

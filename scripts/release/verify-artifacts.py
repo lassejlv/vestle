@@ -20,7 +20,7 @@ def run(*args):
 def smoke(app):
     with tempfile.TemporaryDirectory(prefix='tc-smoke-', dir='/tmp') as data:
         daemon = subprocess.Popen(
-            [str(app / 'Contents/MacOS/termy-code'), '--daemon'],
+            [str(app / 'Contents/MacOS/vestle'), '--daemon'],
             env=dict(os.environ, TERMY_DATA_DIR=data),
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
@@ -114,7 +114,7 @@ def verify_app(app, arch, team):
         if entitlements.strip():
             values = plistlib.loads(entitlements)
             assert not values.get('com.apple.security.get-task-allow'), 'Debug entitlement in release'
-    executable = app / 'Contents/MacOS/termy-code'
+    executable = app / 'Contents/MacOS/vestle'
     assert run('lipo', '-archs', str(executable)).decode().strip() == arch
     run('xcrun', 'stapler', 'validate', str(app))
     run('spctl', '--assess', '--type', 'execute', '--verbose=2', str(app))
@@ -138,14 +138,14 @@ def main():
         assert hashlib.sha256(path.read_bytes()).hexdigest() == checksum, f'Checksum mismatch: {name}'
         files[path.suffix] = path
     assert set(files) == {'.zip', '.dmg', '.gz', '.sig'}, 'Expected DMG, ZIP and signed updater archive'
-    with tempfile.TemporaryDirectory(prefix='tc-verify-', dir='/tmp') as scratch:
+    with tempfile.TemporaryDirectory(prefix='vestle-verify-', dir='/tmp') as scratch:
         extracted = Path(scratch) / 'zip'
         run('ditto', '-x', '-k', str(files['.zip']), str(extracted))
-        verify_app(extracted / 'Termy Code.app', arch, team)
+        verify_app(extracted / 'Vestle.app', arch, team)
         updater = Path(scratch) / 'updater'
         updater.mkdir()
         run('tar', '-xzf', str(files['.gz']), '-C', str(updater))
-        verify_app(updater / 'Termy Code.app', arch, team)
+        verify_app(updater / 'Vestle.app', arch, team)
         dmg = str(files['.dmg'])
         run('codesign', '--verify', '--strict', '--verbose=2', dmg)
         run('xcrun', 'stapler', 'validate', dmg)
@@ -154,7 +154,7 @@ def main():
         mount.mkdir()
         run('hdiutil', 'attach', dmg, '-readonly', '-nobrowse', '-mountpoint', str(mount))
         try:
-            verify_app(mount / 'Termy Code.app', arch, team)
+            verify_app(mount / 'Vestle.app', arch, team)
         finally:
             run('hdiutil', 'detach', str(mount))
     print(f'{arch}: ZIP, DMG and updater checksums, signatures, tickets and Gatekeeper checks passed')

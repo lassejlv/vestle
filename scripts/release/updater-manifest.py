@@ -16,7 +16,7 @@ def manifest(directory, tag, repo):
     version = tag[1:]
     platforms = {}
     for arch, target in [('arm64', 'darwin-aarch64'), ('x86_64', 'darwin-x86_64')]:
-        stem = f'Termy-Code-{version}-macos-{arch}'
+        stem = f'Vestle-{version}-macos-{arch}'
         archive = directory / f'{stem}.app.tar.gz'
         signature = directory / f'{archive.name}.sig'
         checksums = {}
@@ -39,7 +39,7 @@ def manifest(directory, tag, repo):
         }
     return {
         'version': version,
-        'notes': f'Termy Code {version}',
+        'notes': f'Vestle {version}',
         'pub_date': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         'platforms': platforms,
     }

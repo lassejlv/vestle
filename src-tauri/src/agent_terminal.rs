@@ -1,5 +1,5 @@
 //! ACP `terminal/*` requests: commands the agent runs through the client.
-//! Each command gets its own Alacritty PTY. Output is kept as plain text (escape
+//! Each command gets its own libtermy PTY. Output is kept as plain text (escape
 //! sequences removed, carriage returns applied) because it goes back to a
 //! model, and is also streamed to the webview for the live step.
 

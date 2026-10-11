@@ -132,7 +132,7 @@ jobs:
           if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > /tmp/release-draft; then
             [[ "$(cat /tmp/release-draft)" == true ]] || { echo 'Refusing to overwrite a published release'; exit 1; }
           else
-            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Termy Code $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Vestle $RELEASE_TAG" --generate-notes
           fi
           gh release upload "$RELEASE_TAG" ./*.dmg ./*.zip ./*.sha256 ./*.app.tar.gz ./*.sig ./latest.json --clobber
           if [[ "$RELEASE_TAG" == *-* ]]; then

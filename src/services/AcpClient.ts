@@ -2,7 +2,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import { Context, Effect, Layer, Schema, type Scope } from "effect"
 import type { Mention } from "@/domain/mentions"
 import type { ImageAttachment } from "@/domain/session"
-import type { AgentProcess } from "./AgentHost"
+import { type AgentProcess, logSeqOf } from "./AgentHost"
 
 export class AcpError extends Schema.TaggedError<AcpError>()("AcpError", {
   method: Schema.String,
@@ -35,6 +35,8 @@ export interface ClientHandlers {
 export interface TurnEnd {
   readonly stopReason: acp.StopReason | null
   readonly error: { readonly message: string } | null
+  /** The daemon log entry it came from, if it came from the log. */
+  readonly logSeq: number | null
 }
 
 const TURN_END = "_termy/turn_end"
@@ -111,6 +113,7 @@ export class AcpClient extends Context.Service<
                 ? handlers.onTurnEnd({
                     stopReason: (params.stopReason as acp.StopReason | null | undefined) ?? null,
                     error: (params.error as TurnEnd["error"] | undefined) ?? null,
+                    logSeq: logSeqOf(params),
                   })
                 : handlers.onExtensionNotification(method, params),
             ),
@@ -127,7 +130,7 @@ export class AcpClient extends Context.Service<
             connection.initialize({
               protocolVersion: acp.PROTOCOL_VERSION,
               clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
-              clientInfo: { name: "termy-code", title: "Termy Code", version: "0.1.0" },
+              clientInfo: { name: "vestle", title: "Vestle", version: "0.1.0" },
             }),
           ))
 

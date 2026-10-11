@@ -32,7 +32,7 @@ pub fn socket_path() -> PathBuf {
         return preferred;
     }
     let user = std::env::var("USER").unwrap_or_else(|_| "user".to_owned());
-    std::env::temp_dir().join(format!("termy-code-{user}.sock"))
+    std::env::temp_dir().join(format!("vestle-{user}.sock"))
 }
 
 /// Agent logs: what each agent said while no window was watching.

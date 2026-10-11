@@ -25,7 +25,7 @@ export const useAutomaticUpdates = () => {
           notifiedVersion = state.version
           toast("An update is ready", {
             id: "app-update",
-            description: `Termy Code ${state.version} is downloaded and verified.`,
+            description: `Vestle ${state.version} is downloaded and verified.`,
             duration: Infinity,
             action: { label: "Restart to update", onClick: () => { void updates.restart() } },
           })

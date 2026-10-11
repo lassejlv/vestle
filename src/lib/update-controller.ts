@@ -97,7 +97,7 @@ export class UpdateController {
       await this.adapter.relaunch()
     } catch {
       // The package is already installed. Retrying must only restart, never reinstall.
-      this.set({ phase: "restart", version, message: "The update is installed. Quit and reopen Termy Code, or try restarting again." })
+      this.set({ phase: "restart", version, message: "The update is installed. Quit and reopen Vestle, or try restarting again." })
     }
   }
 }

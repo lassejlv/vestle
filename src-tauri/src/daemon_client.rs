@@ -69,8 +69,6 @@ pub struct DaemonClient {
     app: AppHandle,
     connection: tokio::sync::Mutex<Option<Arc<Connection>>>,
     info: Mutex<Info>,
-    /// Set after the first connection, so later ones are announced as reconnects.
-    connected_before: AtomicBool,
 }
 
 impl DaemonClient {
@@ -79,7 +77,6 @@ impl DaemonClient {
             app,
             connection: tokio::sync::Mutex::new(None),
             info: Mutex::new(Info::default()),
-            connected_before: AtomicBool::new(false),
         }
     }
 
@@ -94,9 +91,6 @@ impl DaemonClient {
         }
         let connection = self.connect().await?;
         *current = Some(connection.clone());
-        if self.connected_before.swap(true, Ordering::Relaxed) {
-            let _ = self.app.emit("daemon://reconnected", ());
-        }
         Ok(connection)
     }
 
@@ -130,7 +124,7 @@ impl DaemonClient {
         let connection = self.open_or_start().await?;
         let hello = connection.request("hello", json!({ "protocol": PROTOCOL })).await?;
         if hello.get("protocol").and_then(Value::as_u64) != Some(PROTOCOL) {
-            return Err("The background service is from an incompatible version of Termy Code.".to_owned());
+            return Err("The background service is from an incompatible version of Vestle.".to_owned());
         }
         self.set_info(hello.get("pid").and_then(Value::as_u64).unwrap_or(0), false);
         Ok(connection)
