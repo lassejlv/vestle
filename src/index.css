@@ -1,0 +1,260 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Instrument black chrome, one amber LED. Tokens mirror the Paper file. */
+:root {
+  --bg: #0c0c0d;
+  --panel: #131315;
+  --raised: #1b1b1e;
+  --hover: #222226;
+  --line: #2a2a2e;
+  --text: #ece9e4;
+  --text-2: #9b9892;
+  /* At least 4.5:1 on --raised, so small dim text stays readable. */
+  --text-3: #85827b;
+  --amber: #ffb224;
+  --amber-ink: #1a1204;
+  --effort-max-gradient: linear-gradient(90deg, #ff7a1a 0%, #ffb224 25%, #ffe3a1 50%, #ffb224 75%, #ff7a1a 100%);
+  --add: #4cc38a;
+  --remove: #f0605a;
+  --syn-keyword: #82a9e8;
+  --syn-fn: #e6d3a3;
+  --syn-number: #e8b86d;
+
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--raised);
+  --card-foreground: var(--text);
+  --popover: #1e1e21;
+  --popover-foreground: var(--text);
+  --primary: var(--amber);
+  --primary-foreground: var(--amber-ink);
+  --secondary: var(--raised);
+  --secondary-foreground: var(--text);
+  --muted: var(--raised);
+  --muted-foreground: var(--text-2);
+  --accent: var(--hover);
+  --accent-foreground: var(--text);
+  --destructive: var(--remove);
+  --border: rgb(255 255 255 / 0.06);
+  --input: rgb(255 255 255 / 0.08);
+  --ring: rgb(255 178 36 / 0.5);
+  --radius: 0.625rem;
+
+  /* Overridden at runtime from Settings (src/lib/settings.ts). */
+  --ui-font: "Geist Variable", system-ui, sans-serif;
+  --code-font: "Geist Mono Variable", ui-monospace, monospace;
+  --font-scale: 1;
+  --code-font-size: 12px;
+  --glass-opacity: 0.6;
+
+  /* The window chrome (sidebar, tab strip) and the panels on it. Opaque unless glass is on. */
+  --chrome: var(--panel);
+  --surface: var(--bg);
+}
+
+/* Glass: the window is see-through and macOS blurs the desktop behind it. Panels stay
+   more opaque than the chrome so text over them keeps its contrast. */
+:root[data-glass] {
+  --chrome: rgb(19 19 21 / var(--glass-opacity));
+  --surface: rgb(12 12 13 / min(1, calc(var(--glass-opacity) + 0.3)));
+}
+
+@theme inline {
+  --font-sans: var(--ui-font);
+  --font-mono: var(--code-font);
+  --font-heading: var(--font-sans);
+
+  /* Type scale: 11 for meta, 12 (text-xs) for controls, 13 for UI, 14 (text-sm) for messages. */
+  /* Everything scales with the interface font size setting. */
+  --text-2xs: calc(11px * var(--font-scale));
+  --text-xs: calc(12px * var(--font-scale));
+  --text-ui: calc(13px * var(--font-scale));
+  --text-sm: calc(14px * var(--font-scale));
+  --text-base: calc(16px * var(--font-scale));
+  --text-title: calc(15px * var(--font-scale));
+  --text-display: calc(30px * var(--font-scale));
+  /* Code blocks; the terminal and diffs read the same setting. */
+  --text-code: var(--code-font-size);
+
+  /* Lit edges and drop shadows for the instrument chrome. */
+  --shadow-hairline: inset 0 0 0 1px rgb(255 255 255 / 0.05);
+  --shadow-outline: 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-segment: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-popover: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.07), 0 16px 40px rgb(0 0 0 / 0.5);
+  --shadow-dialog: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(255 255 255 / 0.07), 0 24px 60px rgb(0 0 0 / 0.6);
+  --shadow-composer: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.06), 0 20px 50px rgb(0 0 0 / 0.5);
+  --shadow-composer-drop: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1.5px rgb(255 178 36 / 0.6), 0 20px 50px rgb(0 0 0 / 0.5);
+  --shadow-amber: inset 0 1px 0 rgb(255 255 255 / 0.4), 0 1px 2px rgb(0 0 0 / 0.5), 0 0 18px rgb(255 178 36 / 0.22);
+
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-chrome: var(--chrome);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-amber: var(--amber);
+  --color-amber-ink: var(--amber-ink);
+  --color-add: var(--add);
+  --color-remove: var(--remove);
+  --color-syn-keyword: var(--syn-keyword);
+  --color-syn-fn: var(--syn-fn);
+  --color-syn-number: var(--syn-number);
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+
+  --animate-led: led 1.8s ease-in-out infinite;
+  @keyframes led {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+  --animate-effort-burst: effort-burst 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  @keyframes effort-burst {
+    0% {
+      opacity: 1;
+      transform: translate(0, 0) scale(0.4);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(var(--burst-x), var(--burst-y)) scale(1);
+    }
+  }
+  --animate-effort-flow: effort-flow 7s linear infinite;
+  @keyframes effort-flow {
+    from {
+      background-position: 0% 0;
+    }
+    to {
+      background-position: 200% 0;
+    }
+  }
+  --animate-effort-twinkle: effort-twinkle 3.2s ease-in-out infinite;
+  @keyframes effort-twinkle {
+    0% {
+      opacity: 0;
+      transform: translateX(14px) scale(0.5);
+    }
+    30%,
+    60% {
+      opacity: 0.95;
+      transform: translateX(0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(-16px) scale(0.6);
+    }
+  }
+  --animate-shimmer: shimmer var(--shimmer-duration, 1.7s) linear infinite;
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0% 0;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-chrome text-text font-sans antialiased;
+    font-size: var(--text-ui);
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  ::selection {
+    background: rgb(255 178 36 / 0.25);
+  }
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .led {
+    background: var(--amber);
+    box-shadow:
+      0 0 0 3px rgb(255 178 36 / 0.16),
+      0 0 10px rgb(255 178 36 / 0.7);
+  }
+  .surface {
+    background: var(--surface);
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 0.05),
+      0 8px 30px rgb(0 0 0 / 0.35);
+  }
+  /* xterm's stylesheet paints the viewport black; the terminal's own theme is transparent,
+     so the panel (and glass) shows through. */
+  .xterm .xterm-viewport {
+    background-color: transparent !important;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-led {
+    animation: none;
+  }
+}
+
+/* The Reduce motion setting: no shimmer, pulsing or sliding anywhere. */
+[data-reduce-motion] *,
+[data-reduce-motion] *::before,
+[data-reduce-motion] *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+}
+

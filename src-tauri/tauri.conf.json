@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Termy Code",
+  "version": "0.1.0",
+  "identifier": "dev.termy.code",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Termy Code",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "backgroundColor": "#00000000",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 22
+        },
+        "transparent": true,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwQzM2MjBGRUQ1MUI0NDcKUldSSHRGSHREMkxEOENtandjQVYwenM1Vi9RbkFCTi8zMmxIbllvcnBMVHgzQjBrVGhGRVNDRlYK",
+      "endpoints": [
+        "https://github.com/termylabs/code/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
+  }
+}

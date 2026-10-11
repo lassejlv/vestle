@@ -1,0 +1,142 @@
+name: macOS release
+
+on:
+  push:
+    branches: [release/macos]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Signed macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: '1.99.0'
+          targets: ${{ matrix.target }}
+      - name: Validate release version
+        run: python3 scripts/release/check-version.py
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+      - name: Test backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target '${{ matrix.target }}'
+      - name: Test updater
+        run: |
+          bun test tests/update-controller.test.ts
+          python3 -m unittest discover -s scripts/release -p 'test_*.py'
+      - name: Build app
+        run: bun tauri build --target '${{ matrix.target }}' --bundles app -- --locked
+      - name: Prepare signing credentials
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: bash scripts/release/keychain.sh setup
+      - name: Sign, notarize and package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: bash scripts/release/package-macos.sh '${{ matrix.target }}' '${{ matrix.arch }}'
+      - name: Test distributed app
+        run: python3 scripts/release/verify-artifacts.py release-artifacts '${{ matrix.arch }}'
+      - name: Upload signed downloads
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Clean up signing credentials
+        if: always()
+        run: bash scripts/release/keychain.sh cleanup
+
+  updater-manifest:
+    name: Prepare updater manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: macos-*
+          merge-multiple: true
+          path: release-artifacts
+      - name: Generate updater manifest
+        env:
+          RELEASE_REPO: ${{ github.repository }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+          python3 scripts/release/updater-manifest.py release-artifacts "v$version" "$RELEASE_REPO"
+      - name: Upload updater manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-update-manifest
+          path: release-artifacts/latest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish macOS downloads
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, updater-manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: macos-*
+          merge-multiple: true
+          path: release-artifacts
+      - name: Verify downloads and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          sha256sum --check ./*.sha256
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > /tmp/release-draft; then
+            [[ "$(cat /tmp/release-draft)" == true ]] || { echo 'Refusing to overwrite a published release'; exit 1; }
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Termy Code $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" ./*.dmg ./*.zip ./*.sha256 ./*.app.tar.gz ./*.sig ./latest.json --clobber
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi
